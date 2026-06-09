@@ -1,0 +1,16 @@
+version: v2
+clean: true
+plugins:
+  # protoc-gen-ts_proto ships with the `ts-proto` dev dependency and is resolved
+  # from node_modules/.bin when this runs via `npm run gen`.
+  - local: protoc-gen-ts_proto
+    out: src/gen
+    opt:
+      - outputServices=grpc-js
+      - esModuleInterop=true
+      - useDate=true
+      - forceLong=bigint
+      - env=node
+      - useOptionals=messages
+      - outputJsdoc=true
+      - unrecognizedEnum=false
