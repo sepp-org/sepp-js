@@ -267,6 +267,13 @@ export function jobRejectionFromPb(r: PbJobRejection): JobRejection {
     };
   }
   if (r.invalidRequest) return { kind: "invalid_request", message: r.invalidRequest.message };
+  if (r.queueFull) {
+    return {
+      kind: "queue_full",
+      queue: r.queueFull.queue,
+      limit: bigintToNumber(r.queueFull.limit),
+    };
+  }
   return { kind: "unknown" };
 }
 
@@ -389,6 +396,8 @@ function deadLetterCauseFromPb(c: PbDeadLetterCause): DeadLetterCause {
       return "rejected";
     case PbDeadLetterCause.DEAD_LETTER_CAUSE_LEASE_EXPIRED:
       return "lease_expired";
+    case PbDeadLetterCause.DEAD_LETTER_CAUSE_ADMIN:
+      return "admin";
     default:
       return "unspecified";
   }

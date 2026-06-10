@@ -1,10 +1,14 @@
 version: v2
 clean: true
+inputs:
+  - module: buf.build/sepp-org/sepp-proto:v1.1.2
 plugins:
   # protoc-gen-ts_proto ships with the `ts-proto` dev dependency and is resolved
   # from node_modules/.bin when this runs via `npm run gen`.
   - local: protoc-gen-ts_proto
     out: src/gen
+    include_imports: true
+    include_wkt: true
     opt:
       - outputServices=grpc-js
       - esModuleInterop=true

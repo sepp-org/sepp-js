@@ -187,11 +187,11 @@ Draining **removes** the records from the server, so it is not retried — proce
 ## Development
 
 ```sh
-npm run gen        # regenerate src/gen from proto/ via buf + ts-proto (needs `buf` on PATH)
+npm run gen        # regenerate src/gen from the BSR module via buf + ts-proto (needs `buf` on PATH)
 npm run build      # emit dist/ (ESM + CJS + .d.ts) with tsup
 npm test           # run the unit suite (vitest)
 npm run typecheck  # tsc --noEmit
 npm run example    # run examples/main.ts against $SEPP_ADDR (default 127.0.0.1:50051)
 ```
 
-The protobuf contract is vendored under `proto/` (a validate-stripped snapshot of `buf.build/sepp-org/sepp-proto`) and the generated stubs under `src/gen/` are committed, so installing the package needs no `buf`/`protoc`.
+Codegen pulls the contract straight from `buf.build/sepp-org/sepp-proto` (version pinned in `buf.gen.yaml`), and the generated stubs under `src/gen/` are committed, so installing the package needs no `buf`/`protoc`.

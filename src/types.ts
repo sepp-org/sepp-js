@@ -158,9 +158,9 @@ export interface EnqueueAck {
 
 /**
  * Why the server refused a single job. A discriminated union keyed on `kind`;
- * every variant is deterministic (re-sending the same job against the same
- * server state yields the same rejection). Transient problems surface as a
- * {@link ClientError} instead.
+ * every variant except `queue_full` is deterministic (re-sending the same job
+ * against the same server state yields the same rejection). Transient problems
+ * surface as a {@link ClientError} instead.
  */
 export type JobRejection =
   | { kind: "unknown_queue"; queue: string }
@@ -175,6 +175,8 @@ export type JobRejection =
   | { kind: "idempotency_key_too_long"; limit: number; actual: number }
   | { kind: "scheduled_too_far"; horizon: number; actual: Date }
   | { kind: "invalid_request"; message: string }
+  /** The only non-deterministic rejection: clears once the queue drains below `limit`. */
+  | { kind: "queue_full"; queue: string; limit: number }
   | { kind: "unknown" };
 
 /** A single job's rejection within an atomic batch, paired with its request index. */
@@ -217,6 +219,8 @@ export function describeJobRejection(r: JobRejection): string {
       return `scheduled_at ${r.actual.toISOString()} is beyond the max schedule horizon (${r.horizon}ms)`;
     case "invalid_request":
       return `structural validation failed: ${r.message}`;
+    case "queue_full":
+      return `queue "${r.queue}" is at its capacity of ${r.limit} jobs`;
     case "unknown":
       return "server returned an unrecognized rejection variant";
   }
@@ -419,7 +423,12 @@ export interface ServerInfo {
 // ---------------------------------------------------------------------------
 
 /** Why a job was moved to the dead-letter store. */
-export type DeadLetterCause = "unspecified" | "attempts_exhausted" | "rejected" | "lease_expired";
+export type DeadLetterCause =
+  | "unspecified"
+  | "attempts_exhausted"
+  | "rejected"
+  | "lease_expired"
+  | "admin";
 
 /** @internal */ export interface DeadLetterRecordInit {
   queue: string;

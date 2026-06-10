@@ -25,24 +25,26 @@ import { Timestamp } from "../../google/protobuf/timestamp";
 export const protobufPackage = "sepp.v1";
 
 /**
- * Vendored snapshot of the sepp wire contract for client code generation.
+ * Why a job was moved to dead-letter. Mirrors the terminal paths on the
+ * server: a worker explicitly rejected it, it ran out of attempts, its lease
+ * expired with no attempts left, or an operator dead-lettered it by hand.
  *
- * This is a copy of buf.build/sepp-org/sepp-proto with the buf.validate
- * annotations stripped: those constraints are enforced by the server, and
- * carrying them here would only pull a protovalidate dependency into the
- * generated client for no benefit. The field numbers, types, and message
- * shapes are identical to the source of truth.
+ * More causes may be added over time. Clients must treat an unrecognized
+ * value as DEAD_LETTER_CAUSE_UNSPECIFIED.
  */
-
-/** Why a job was moved to dead-letter. */
 export enum DeadLetterCause {
   DEAD_LETTER_CAUSE_UNSPECIFIED = 0,
   /** DEAD_LETTER_CAUSE_ATTEMPTS_EXHAUSTED - The job exhausted its max_attempts across nacks and redeliveries. */
   DEAD_LETTER_CAUSE_ATTEMPTS_EXHAUSTED = 1,
   /** DEAD_LETTER_CAUSE_REJECTED - A worker nacked with the dead_letter strategy, skipping remaining attempts. */
   DEAD_LETTER_CAUSE_REJECTED = 2,
-  /** DEAD_LETTER_CAUSE_LEASE_EXPIRED - The lease expired while the job was on its final attempt. */
+  /**
+   * DEAD_LETTER_CAUSE_LEASE_EXPIRED - The lease expired while the job was on its final attempt, so it could not
+   * be redelivered.
+   */
   DEAD_LETTER_CAUSE_LEASE_EXPIRED = 3,
+  /** DEAD_LETTER_CAUSE_ADMIN - An operator dead-lettered the job through the admin API. */
+  DEAD_LETTER_CAUSE_ADMIN = 4,
 }
 
 export function deadLetterCauseFromJSON(object: any): DeadLetterCause {
@@ -59,6 +61,9 @@ export function deadLetterCauseFromJSON(object: any): DeadLetterCause {
     case 3:
     case "DEAD_LETTER_CAUSE_LEASE_EXPIRED":
       return DeadLetterCause.DEAD_LETTER_CAUSE_LEASE_EXPIRED;
+    case 4:
+    case "DEAD_LETTER_CAUSE_ADMIN":
+      return DeadLetterCause.DEAD_LETTER_CAUSE_ADMIN;
     default:
       throw new globalThis.Error("Unrecognized enum value " + object + " for enum DeadLetterCause");
   }
@@ -74,12 +79,17 @@ export function deadLetterCauseToJSON(object: DeadLetterCause): string {
       return "DEAD_LETTER_CAUSE_REJECTED";
     case DeadLetterCause.DEAD_LETTER_CAUSE_LEASE_EXPIRED:
       return "DEAD_LETTER_CAUSE_LEASE_EXPIRED";
+    case DeadLetterCause.DEAD_LETTER_CAUSE_ADMIN:
+      return "DEAD_LETTER_CAUSE_ADMIN";
     default:
       throw new globalThis.Error("Unrecognized enum value " + object + " for enum DeadLetterCause");
   }
 }
 
-/** A JSON-primitive value, for use in the custom value map. */
+/**
+ * A JSON-primitive value, for use in the custom value map. Exactly one value
+ * must be set.
+ */
 export interface PrimitiveValue {
   stringValue?: string | undefined;
   doubleValue?: number | undefined;
@@ -97,6 +107,7 @@ export interface TraceContext {
 
 /** Carries payload bytes and the encoding hint. */
 export interface Payload {
+  /** Must be non-empty: omit the payload entirely for jobs that carry no data. */
   data: Buffer;
   encoding: string;
 }
@@ -120,7 +131,7 @@ export interface Job {
   traceContext?:
     | TraceContext
     | undefined;
-  /** Wall-clock time when the producer enqueued this job. */
+  /** Wall-clock time when the producer enqueued this job. Always set. */
   enqueuedAt?:
     | Date
     | undefined;
@@ -128,11 +139,14 @@ export interface Job {
   attempt: number;
   /** How many attempts are allowed before this job goes to dead-letter. */
   maxAttempts: number;
-  /** Wall-clock time when the lease on this job expires. */
+  /**
+   * Wall-clock time when the lease on this job expires. Always set.
+   * If the worker has not acked/nacked/extended by this time, the job becomes available for redelivery.
+   */
   leaseExpiresAt?:
     | Date
     | undefined;
-  /** Custom key-value pairs. */
+  /** Custom key-value pairs. Keys are non-empty. */
   custom: { [key: string]: PrimitiveValue };
   /** Schedule for future execution. If unset, the job is available immediately. */
   scheduledAt?:
@@ -140,7 +154,9 @@ export interface Job {
     | undefined;
   /**
    * The queue this job belongs to. Populated on jobs returned by Reserve and on
-   * the job embedded in a DeadLetterRecord.
+   * the job embedded in a DeadLetterRecord, so a worker reserving from several
+   * queues can tell which one each job came from. (Empty in the server's own
+   * stored representation, where the queue is keyed separately.)
    */
   queue: string;
 }
@@ -151,22 +167,71 @@ export interface Job_CustomEntry {
 }
 
 /**
- * Reason a single job in an enqueue batch was rejected. Every variant
- * represents a deterministic rejection.
+ * Reason a single job in an enqueue batch was rejected. Every variant except
+ * queue_full is deterministic: retrying the same job against the same server
+ * configuration produces the same outcome. queue_full reflects queue depth at
+ * admission time and clears once the queue drains. Transient server failures
+ * (e.g. storage outage) are still reported as a whole-batch gRPC error, never
+ * as a JobRejection.
+ *
+ * Servers may add rejection reasons over time. Clients must treat a rejection
+ * whose reason they do not recognize as a rejection of unknown kind, not as a
+ * malformed response.
  */
 export interface JobRejection {
-  unknownQueue?: UnknownQueue | undefined;
-  payloadTooLarge?: PayloadTooLarge | undefined;
-  encodingNotAllowed?: EncodingNotAllowed | undefined;
-  jobTypeNotAllowed?: JobTypeNotAllowed | undefined;
-  customEntriesTooMany?: CustomEntriesTooMany | undefined;
-  customMapTooLarge?: CustomMapTooLarge | undefined;
-  customKeyTooLong?: CustomKeyTooLong | undefined;
-  queueNameTooLong?: QueueNameTooLong | undefined;
-  jobTypeNameTooLong?: JobTypeNameTooLong | undefined;
-  idempotencyKeyTooLong?: IdempotencyKeyTooLong | undefined;
-  scheduledTooFar?: ScheduledTooFar | undefined;
-  invalidRequest?: InvalidRequest | undefined;
+  /** Strict mode is on and the target queue is not declared. */
+  unknownQueue?:
+    | UnknownQueue
+    | undefined;
+  /** payload.data exceeds the queue's max_payload_bytes. */
+  payloadTooLarge?:
+    | PayloadTooLarge
+    | undefined;
+  /** The queue restricts encodings and payload.encoding is not allowed. */
+  encodingNotAllowed?:
+    | EncodingNotAllowed
+    | undefined;
+  /** The queue restricts job_types and the requested job_type is not allowed. */
+  jobTypeNotAllowed?:
+    | JobTypeNotAllowed
+    | undefined;
+  /** The custom map has more entries than the queue allows. */
+  customEntriesTooMany?:
+    | CustomEntriesTooMany
+    | undefined;
+  /** Aggregate bytes of the custom map exceed the queue limit. */
+  customMapTooLarge?:
+    | CustomMapTooLarge
+    | undefined;
+  /** A key in the custom map exceeds max_custom_key_bytes. */
+  customKeyTooLong?:
+    | CustomKeyTooLong
+    | undefined;
+  /** queue name exceeds max_queue_name_bytes. */
+  queueNameTooLong?:
+    | QueueNameTooLong
+    | undefined;
+  /** job_type exceeds max_job_type_bytes. */
+  jobTypeNameTooLong?:
+    | JobTypeNameTooLong
+    | undefined;
+  /** idempotency_key exceeds max_idempotency_key_bytes. */
+  idempotencyKeyTooLong?:
+    | IdempotencyKeyTooLong
+    | undefined;
+  /** scheduled_at is further out than max_schedule_horizon. */
+  scheduledTooFar?:
+    | ScheduledTooFar
+    | undefined;
+  /** Structural validation failed (e.g. required field missing). */
+  invalidRequest?:
+    | InvalidRequest
+    | undefined;
+  /**
+   * The target queue is at capacity (max_queue_depth). The only
+   * non-deterministic rejection: it clears once the queue drains.
+   */
+  queueFull?: QueueFull | undefined;
 }
 
 export interface UnknownQueue {
@@ -220,16 +285,28 @@ export interface IdempotencyKeyTooLong {
 }
 
 export interface ScheduledTooFar {
-  /** The server's configured maximum schedule horizon. */
+  /**
+   * The server's configured maximum schedule horizon (how far ahead
+   * scheduled_at may be set, measured from the time of the request).
+   */
   horizon?:
     | Duration
     | undefined;
-  /** The absolute scheduled_at the producer requested, which exceeded now + horizon. */
+  /**
+   * The absolute scheduled_at the producer requested, which exceeded
+   * now + horizon.
+   */
   actual?: Date | undefined;
 }
 
 export interface InvalidRequest {
   message: string;
+}
+
+export interface QueueFull {
+  queue: string;
+  /** The queue's configured max_queue_depth. */
+  limit: bigint;
 }
 
 /** Enqueue a job for processing. */
@@ -242,15 +319,28 @@ export interface EnqueueRequest {
   payload?:
     | Payload
     | undefined;
-  /** Deduplication key. */
+  /**
+   * Deduplication key, scoped to the target queue. A repeat enqueue with the
+   * same key inside the queue's dedup window is not enqueued again: it returns
+   * the original job's id with deduplicated=true. The window is time-based
+   * server configuration (not advertised in GetServerInfo) and is independent
+   * of job state, so a repeat within the window dedups even if the original
+   * job already completed or was dead-lettered.
+   */
   idempotencyKey?:
     | string
     | undefined;
-  /** Priority override. If unset, the queue default is used. Range: 0-9. */
+  /**
+   * Priority override. If unset, the queue default is used.
+   * Range: 0–9. Higher priorities dequeue first.
+   */
   priority?:
     | number
     | undefined;
-  /** Max attempts override. If unset, the queue default is used. */
+  /**
+   * Max attempts override. If unset, the queue default is used.
+   * Must be at least 1.
+   */
   maxAttempts?:
     | number
     | undefined;
@@ -258,9 +348,12 @@ export interface EnqueueRequest {
   traceContext?:
     | TraceContext
     | undefined;
-  /** Custom key-value pairs. */
+  /** Custom key-value pairs. Keys must be non-empty. */
   custom: { [key: string]: PrimitiveValue };
-  /** Schedule for future execution. If unset, the job is available immediately. */
+  /**
+   * Schedule for future execution. If unset, the job is available immediately.
+   * A time in the past is accepted and makes the job available immediately.
+   */
   scheduledAt?: Date | undefined;
 }
 
@@ -269,7 +362,10 @@ export interface EnqueueRequest_CustomEntry {
   value?: PrimitiveValue | undefined;
 }
 
-/** Response for an EnqueueRequest. */
+/**
+ * Response for an EnqueueRequest. Contains the assigned job ID and whether this was a duplicate.
+ * Mostly useful for logging on the producer side.
+ */
 export interface EnqueueResponse {
   /** Server-assigned job ID (UUID). */
   jobId: string;
@@ -277,9 +373,9 @@ export interface EnqueueResponse {
   deduplicated: boolean;
 }
 
-/** Batch enqueue request. */
+/** Batch enqueue request and response. */
 export interface EnqueueBatchRequest {
-  /** Jobs to enqueue. */
+  /** Jobs to enqueue. At least one. */
   jobs: EnqueueRequest[];
 }
 
@@ -288,15 +384,23 @@ export interface EnqueueBatchResponse {
   results: JobResult[];
 }
 
-/** Outcome of a single job in the batch. */
+/** Outcome of a single job in the batch. Exactly one outcome is set. */
 export interface JobResult {
-  success?: EnqueueResponse | undefined;
+  /** The job was enqueued. */
+  success?:
+    | EnqueueResponse
+    | undefined;
+  /** The job was rejected. See JobRejection for the catalogue of reasons. */
   rejection?: JobRejection | undefined;
 }
 
-/** Response for EnqueueAtomic. */
+/** Response for EnqueueAtomic. Exactly one outcome is set. */
 export interface EnqueueAtomicResponse {
-  success?: EnqueueAtomicSuccess | undefined;
+  /** All jobs passed pre-flight checks and were enqueued atomically. */
+  success?:
+    | EnqueueAtomicSuccess
+    | undefined;
+  /** At least one job failed a pre-flight check; nothing was enqueued. */
   rejection?: BatchValidationFailure | undefined;
 }
 
@@ -305,7 +409,10 @@ export interface EnqueueAtomicSuccess {
   responses: EnqueueResponse[];
 }
 
-/** The validation-failure branch of EnqueueAtomicResponse. */
+/**
+ * The rejection branch of EnqueueAtomicResponse. Lists every job that failed
+ * a pre-flight check (validation or queue capacity).
+ */
 export interface BatchValidationFailure {
   errors: JobValidationError[];
 }
@@ -319,32 +426,55 @@ export interface JobValidationError {
 
 /** Worker requests one or more jobs in a long-polling manner. */
 export interface ReserveRequest {
-  /** Queues to pull from, polled in order: index 0 first, then index 1, etc. */
+  /**
+   * Queues to pull from, at least one. Worker is willing to process jobs from
+   * any of these. Queue at index 0 is polled first, then index 1, etc.
+   */
   queues: string[];
-  /** How long the worker is willing to wait for a job. Server clamps to max_wait_timeout. */
+  /**
+   * How long the worker is willing to wait for a job. Unset means no wait.
+   * If no job is available within this window, the response has no jobs.
+   * The server clamps this to its configured max (max_wait_timeout,
+   * advertised in GetServerInfo); a larger value is not an error.
+   */
   waitTimeout?:
     | Duration
     | undefined;
-  /** Lease duration the worker wants. Server may clamp to max_lease_duration. */
+  /**
+   * Lease duration the worker wants. Must be positive. Server may clamp to its
+   * configured max (max_lease_duration, advertised in GetServerInfo). The
+   * worker must ack, nack, or extend before this elapses, or the job will be
+   * redelivered.
+   */
   leaseDuration?:
     | Duration
     | undefined;
-  /** A stable worker identifier, useful for observability. */
+  /**
+   * A stable worker identifier, useful for observability and
+   * sticky-routing future features.
+   */
   workerId?:
     | string
     | undefined;
-  /** Maximum number of jobs to return in one response. Defaults to 1 if unset. */
+  /**
+   * Maximum number of jobs to return in one response. Defaults to 1 if unset.
+   * The server clamps this to its configured max (max_reserve_batch, advertised
+   * in GetServerInfo); a larger value is not an error.
+   */
   maxJobs?: number | undefined;
 }
 
-/** Zero or more jobs, up to the effective max_jobs. */
+/**
+ * Zero or more jobs, up to the effective max_jobs. Empty when the wait timeout
+ * fires with no job available.
+ */
 export interface ReserveResponse {
   jobs: Job[];
 }
 
 export interface AckRequest {
   jobId: string;
-  /** The attempt for which this ack applies. */
+  /** The attempt for which this ack applies. Used to prevent acking a job that has been redelivered. */
   attempt: number;
   /** Worker identifier for observability. */
   workerId?: string | undefined;
@@ -356,7 +486,7 @@ export interface AckResponse {
 
 export interface NackRequest {
   jobId: string;
-  /** The attempt for which this nack applies. */
+  /** The attempt for which this nack applies. Used to prevent nacking a job that has been redelivered. */
   attempt: number;
   /** Human-readable reason, captured for debugging and metrics. */
   reason?:
@@ -370,6 +500,7 @@ export interface NackRequest {
   workerId?: string | undefined;
 }
 
+/** Exactly one strategy must be set. */
 export interface NackRetry {
   /** Use the queue's default retry policy. */
   default?:
@@ -385,15 +516,19 @@ export interface NackRetry {
 
 export interface NackResponse {
   jobId: string;
-  /** True if this nack moved the job to dead-letter. */
+  /** True if this nack moved the job to dead-letter (e.g. max attempts reached). */
   deadLettered: boolean;
 }
 
 export interface ExtendRequest {
   jobId: string;
-  /** The attempt for which this extend applies. */
+  /** The attempt for which this extend applies. Used to prevent extending a job that has been redelivered. */
   attempt: number;
-  /** How much longer to extend the lease, measured from now. */
+  /**
+   * How much longer to extend the lease, measured from now. Must be positive.
+   * The server clamps this to its configured max (max_lease_duration,
+   * advertised in GetServerInfo); a larger value is not an error.
+   */
   leaseDuration?:
     | Duration
     | undefined;
@@ -403,39 +538,62 @@ export interface ExtendRequest {
 
 export interface ExtendResponse {
   jobId: string;
-  /** New lease expiration. */
+  /** New lease expiration. Always set. */
   leaseExpiresAt?: Date | undefined;
 }
 
-/** A terminal record of a job that was dead-lettered. */
+/**
+ * A terminal record of a job that was dead-lettered. Retained only when the
+ * server has dead-letter retention enabled (see
+ * GetServerInfoResponse.dead_letter_retention_enabled), and returned by
+ * DrainDeadLetters for inspection and manual replay.
+ */
 export interface DeadLetterRecord {
-  /** The dead-lettered job, as a snapshot at failure time. */
+  /**
+   * The dead-lettered job, as a snapshot at failure time: the stored job
+   * augmented with its queue and payload. Transient fields such as
+   * lease_expires_at may be unset or stale, so do not validate it as a live Job — to
+   * replay, copy its fields into an EnqueueRequest.
+   */
   job?:
     | Job
     | undefined;
   /** Why the job was dead-lettered. */
   cause: DeadLetterCause;
-  /** Wall-clock time the job was dead-lettered. */
+  /** Wall-clock time the job was dead-lettered. Always set. */
   failedAt?:
     | Date
     | undefined;
   /** The attempt number the job died on (1-based). */
   finalAttempt: number;
-  /** The reason from the last Nack, when the job died on a nack path. */
+  /**
+   * The reason from the last Nack, when the job died on a nack path. Absent when
+   * the job died because its lease expired (no worker reported a reason).
+   */
   lastReason?: string | undefined;
 }
 
-/** Request to drain dead-lettered records. */
+/** Request to drain dead-lettered records. See the DrainDeadLetters rpc. */
 export interface DrainDeadLettersRequest {
-  /** Restrict the drain to a single queue. If unset, drains across all queues. */
+  /**
+   * Restrict the drain to a single queue. If unset, drains across all queues,
+   * oldest-first.
+   */
   queue?:
     | string
     | undefined;
-  /** Maximum number of records to return in one response. Defaults to 1 if unset. */
+  /**
+   * Maximum number of records to return in one response. Defaults to 1 if unset.
+   * The server clamps this to its configured max (max_reserve_batch, advertised
+   * in GetServerInfo); a larger value is not an error.
+   */
   max?: number | undefined;
 }
 
-/** Dead-letter records removed from the server, oldest-first. */
+/**
+ * Dead-letter records removed from the server, oldest-first. Empty when nothing
+ * matched (or dead-letter retention is disabled).
+ */
 export interface DrainDeadLettersResponse {
   records: DeadLetterRecord[];
 }
@@ -452,27 +610,53 @@ export interface GetServerInfoResponse {
   serverTime?:
     | Date
     | undefined;
-  /** If true, the server rejects all encodings not in allowed_encodings. */
+  /**
+   * If true, the server will reject all encodings not explicitly listed in allowed_encodings.
+   * If false, the server accepts all encodings, regardless of allowed_encodings.
+   */
   restrictsEncodings: boolean;
   allowedEncodings: string[];
   maxPayloadBytes: bigint;
   maxCustomEntries: number;
   maxCustomTotalBytes: bigint;
   maxCustomKeyBytes: number;
+  /** Max bytes in a queue name (-> QueueNameTooLong). */
   maxQueueNameBytes: number;
+  /** Max bytes in a job_type (-> JobTypeNameTooLong). */
   maxJobTypeBytes: number;
+  /** Max bytes in an idempotency_key (-> IdempotencyKeyTooLong). */
   maxIdempotencyKeyBytes: number;
-  maxScheduleHorizon?: Duration | undefined;
+  /** How far ahead scheduled_at may be set (-> ScheduledTooFar). */
+  maxScheduleHorizon?:
+    | Duration
+    | undefined;
+  /**
+   * Max jobs accepted in a single EnqueueBatch/EnqueueAtomic request. Batches
+   * larger than this fail the whole request with INVALID_ARGUMENT.
+   */
   maxEnqueueBatch: number;
+  /** Max jobs returned by a single Reserve (clamps ReserveRequest.max_jobs). */
   maxReserveBatch: number;
+  /** Max queues a single Reserve may list (exceeding this is INVALID_ARGUMENT). */
   maxReserveQueues: number;
-  maxWaitTimeout?: Duration | undefined;
+  /** Max long-poll wait (clamps ReserveRequest.wait_timeout). */
+  maxWaitTimeout?:
+    | Duration
+    | undefined;
+  /** Max lease duration (clamps ReserveRequest.lease_duration). */
   maxLeaseDuration?:
     | Duration
     | undefined;
-  /** If true, enqueueing to an undeclared queue is rejected with UnknownQueue. */
+  /**
+   * If true, the server is in strict mode: enqueueing to an undeclared queue is
+   * rejected with UnknownQueue. If false, queues are created on demand.
+   */
   strictQueues: boolean;
-  /** If true, the server retains dead-lettered jobs and DrainDeadLetters can return them. */
+  /**
+   * If true, the server retains dead-lettered jobs (a positive retention window
+   * is configured) and DrainDeadLetters can return them. If false, dead jobs are deleted on
+   * dead-letter and DrainDeadLetters always returns an empty list.
+   */
   deadLetterRetentionEnabled: boolean;
 }
 
@@ -1149,6 +1333,7 @@ function createBaseJobRejection(): JobRejection {
     idempotencyKeyTooLong: undefined,
     scheduledTooFar: undefined,
     invalidRequest: undefined,
+    queueFull: undefined,
   };
 }
 
@@ -1189,6 +1374,9 @@ export const JobRejection: MessageFns<JobRejection> = {
     }
     if (message.invalidRequest !== undefined) {
       InvalidRequest.encode(message.invalidRequest, writer.uint32(98).fork()).join();
+    }
+    if (message.queueFull !== undefined) {
+      QueueFull.encode(message.queueFull, writer.uint32(106).fork()).join();
     }
     return writer;
   },
@@ -1296,6 +1484,14 @@ export const JobRejection: MessageFns<JobRejection> = {
           message.invalidRequest = InvalidRequest.decode(reader, reader.uint32());
           continue;
         }
+        case 13: {
+          if (tag !== 106) {
+            break;
+          }
+
+          message.queueFull = QueueFull.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1367,6 +1563,11 @@ export const JobRejection: MessageFns<JobRejection> = {
         : isSet(object.invalid_request)
         ? InvalidRequest.fromJSON(object.invalid_request)
         : undefined,
+      queueFull: isSet(object.queueFull)
+        ? QueueFull.fromJSON(object.queueFull)
+        : isSet(object.queue_full)
+        ? QueueFull.fromJSON(object.queue_full)
+        : undefined,
     };
   },
 
@@ -1407,6 +1608,9 @@ export const JobRejection: MessageFns<JobRejection> = {
     }
     if (message.invalidRequest !== undefined) {
       obj.invalidRequest = InvalidRequest.toJSON(message.invalidRequest);
+    }
+    if (message.queueFull !== undefined) {
+      obj.queueFull = QueueFull.toJSON(message.queueFull);
     }
     return obj;
   },
@@ -1452,6 +1656,9 @@ export const JobRejection: MessageFns<JobRejection> = {
       : undefined;
     message.invalidRequest = (object.invalidRequest !== undefined && object.invalidRequest !== null)
       ? InvalidRequest.fromPartial(object.invalidRequest)
+      : undefined;
+    message.queueFull = (object.queueFull !== undefined && object.queueFull !== null)
+      ? QueueFull.fromPartial(object.queueFull)
       : undefined;
     return message;
   },
@@ -2375,6 +2582,85 @@ export const InvalidRequest: MessageFns<InvalidRequest> = {
   fromPartial<I extends Exact<DeepPartial<InvalidRequest>, I>>(object: I): InvalidRequest {
     const message = createBaseInvalidRequest();
     message.message = object.message ?? "";
+    return message;
+  },
+};
+
+function createBaseQueueFull(): QueueFull {
+  return { queue: "", limit: 0n };
+}
+
+export const QueueFull: MessageFns<QueueFull> = {
+  encode(message: QueueFull, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.queue !== "") {
+      writer.uint32(10).string(message.queue);
+    }
+    if (message.limit !== 0n) {
+      if (BigInt.asUintN(64, message.limit) !== message.limit) {
+        throw new globalThis.Error("value provided for field message.limit of type uint64 too large");
+      }
+      writer.uint32(16).uint64(message.limit);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): QueueFull {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseQueueFull();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.queue = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.limit = reader.uint64() as bigint;
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): QueueFull {
+    return {
+      queue: isSet(object.queue) ? globalThis.String(object.queue) : "",
+      limit: isSet(object.limit) ? BigInt(object.limit) : 0n,
+    };
+  },
+
+  toJSON(message: QueueFull): unknown {
+    const obj: any = {};
+    if (message.queue !== "") {
+      obj.queue = message.queue;
+    }
+    if (message.limit !== 0n) {
+      obj.limit = message.limit.toString();
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<QueueFull>, I>>(base?: I): QueueFull {
+    return QueueFull.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<QueueFull>, I>>(object: I): QueueFull {
+    const message = createBaseQueueFull();
+    message.queue = object.queue ?? "";
+    message.limit = object.limit ?? 0n;
     return message;
   },
 };
@@ -4952,11 +5238,23 @@ export const GetServerInfoResponse: MessageFns<GetServerInfoResponse> = {
   },
 };
 
+/**
+ * Authentication: when the server is configured with API keys, every RPC
+ * requires an `authorization` metadata header of the form `Bearer <api key>`.
+ * Requests with a missing or invalid key fail with UNAUTHENTICATED.
+ */
 export type QueueServiceService = typeof QueueServiceService;
 export const QueueServiceService = {
   /**
    * Best-effort batch enqueue. Accepts multiple jobs in one request and
-   * returns an individual success or rejection per job.
+   * returns an individual success or rejection per job. Use this for
+   * fan-out batches of independent jobs where partial success is fine.
+   *
+   * Whole-batch failures use gRPC status codes:
+   *   INVALID_ARGUMENT  - batch shape is malformed (empty, exceeds max_enqueue_batch)
+   *   UNAUTHENTICATED   - missing or invalid API key
+   *   INTERNAL          - server-side storage failure. Transient, but a retry
+   *                       may duplicate jobs that carry no idempotency_key.
    */
   enqueueBatch: {
     path: "/sepp.v1.QueueService/EnqueueBatch" as const,
@@ -4968,7 +5266,18 @@ export const QueueServiceService = {
       Buffer.from(EnqueueBatchResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): EnqueueBatchResponse => EnqueueBatchResponse.decode(value),
   },
-  /** Atomic batch enqueue. Either every job is enqueued or none are. */
+  /**
+   * Atomic batch enqueue. Either every job is enqueued or none are.
+   *
+   * Use this when the jobs are coordinated steps and partial success would
+   * leave the system in an inconsistent state.
+   *
+   * gRPC status codes:
+   *   INVALID_ARGUMENT  - batch shape is malformed (empty, exceeds max_enqueue_batch)
+   *   UNAUTHENTICATED   - missing or invalid API key
+   *   INTERNAL          - server-side storage failure. Transient, but a retry
+   *                       may duplicate jobs that carry no idempotency_key.
+   */
   enqueueAtomic: {
     path: "/sepp.v1.QueueService/EnqueueAtomic" as const,
     requestStream: false as const,
@@ -4979,7 +5288,16 @@ export const QueueServiceService = {
       Buffer.from(EnqueueAtomicResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): EnqueueAtomicResponse => EnqueueAtomicResponse.decode(value),
   },
-  /** Long-poll reserve. Returns zero or more jobs, or times out with an empty list. */
+  /**
+   * Long-poll reserve. Returns zero or more jobs, or times out with an empty list.
+   *
+   * gRPC status codes:
+   *   INVALID_ARGUMENT     - request shape is malformed
+   *   FAILED_PRECONDITION  - server is in strict mode and one or more requested
+   *                          queues are not declared
+   *   UNAUTHENTICATED      - missing or invalid API key
+   *   INTERNAL             - server-side storage failure
+   */
   reserve: {
     path: "/sepp.v1.QueueService/Reserve" as const,
     requestStream: false as const,
@@ -4989,7 +5307,18 @@ export const QueueServiceService = {
     responseSerialize: (value: ReserveResponse): Buffer => Buffer.from(ReserveResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): ReserveResponse => ReserveResponse.decode(value),
   },
-  /** Acknowledge successful completion of a job. */
+  /**
+   * Acknowledge successful completion of a job.
+   *
+   * gRPC status codes:
+   *   INVALID_ARGUMENT     - request shape is malformed
+   *   NOT_FOUND            - no in-flight job with this id (already acked,
+   *                          lease expired and was reassigned, or never existed)
+   *   FAILED_PRECONDITION  - the attempt number does not match the current
+   *                          in-flight attempt (lease was reassigned)
+   *   UNAUTHENTICATED      - missing or invalid API key
+   *   INTERNAL             - server-side storage failure
+   */
   ack: {
     path: "/sepp.v1.QueueService/Ack" as const,
     requestStream: false as const,
@@ -4999,7 +5328,7 @@ export const QueueServiceService = {
     responseSerialize: (value: AckResponse): Buffer => Buffer.from(AckResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): AckResponse => AckResponse.decode(value),
   },
-  /** Negative-acknowledge with retry directive. */
+  /** Negative-acknowledge with retry directive. Same status codes as Ack. */
   nack: {
     path: "/sepp.v1.QueueService/Nack" as const,
     requestStream: false as const,
@@ -5009,7 +5338,7 @@ export const QueueServiceService = {
     responseSerialize: (value: NackResponse): Buffer => Buffer.from(NackResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): NackResponse => NackResponse.decode(value),
   },
-  /** Extend the lease on an in-flight job. */
+  /** Extend the lease on an in-flight job. Same status codes as Ack. */
   extend: {
     path: "/sepp.v1.QueueService/Extend" as const,
     requestStream: false as const,
@@ -5019,7 +5348,24 @@ export const QueueServiceService = {
     responseSerialize: (value: ExtendResponse): Buffer => Buffer.from(ExtendResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): ExtendResponse => ExtendResponse.decode(value),
   },
-  /** Drain dead-lettered jobs for inspection and manual replay. */
+  /**
+   * Drain dead-lettered jobs for inspection and manual replay.
+   *
+   * Returns up to `max` DeadLetterRecords (oldest-first, optionally filtered to
+   * a single queue) and REMOVES them from the server in the same transaction
+   * before responding. This is destructive and privileged: there is no
+   * redelivery token (unlike Reserve/Ack), so a dropped response permanently
+   * removes the jobs.
+   *
+   * An empty list means nothing matched, which is indistinguishable from
+   * dead-letter retention being disabled — check dead_letter_retention_enabled
+   * in GetServerInfo.
+   *
+   * gRPC status codes:
+   *   INVALID_ARGUMENT  - request shape is malformed
+   *   UNAUTHENTICATED   - missing or invalid API key
+   *   INTERNAL          - server-side storage failure
+   */
   drainDeadLetters: {
     path: "/sepp.v1.QueueService/DrainDeadLetters" as const,
     requestStream: false as const,
@@ -5031,7 +5377,7 @@ export const QueueServiceService = {
       Buffer.from(DrainDeadLettersResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): DrainDeadLettersResponse => DrainDeadLettersResponse.decode(value),
   },
-  /** Get server info and capabilities. */
+  /** Get server info and capabilities. INTERNAL on storage failure; otherwise infallible. */
   getServerInfo: {
     path: "/sepp.v1.QueueService/GetServerInfo" as const,
     requestStream: false as const,
@@ -5047,29 +5393,91 @@ export const QueueServiceService = {
 export interface QueueServiceServer extends UntypedServiceImplementation {
   /**
    * Best-effort batch enqueue. Accepts multiple jobs in one request and
-   * returns an individual success or rejection per job.
+   * returns an individual success or rejection per job. Use this for
+   * fan-out batches of independent jobs where partial success is fine.
+   *
+   * Whole-batch failures use gRPC status codes:
+   *   INVALID_ARGUMENT  - batch shape is malformed (empty, exceeds max_enqueue_batch)
+   *   UNAUTHENTICATED   - missing or invalid API key
+   *   INTERNAL          - server-side storage failure. Transient, but a retry
+   *                       may duplicate jobs that carry no idempotency_key.
    */
   enqueueBatch: handleUnaryCall<EnqueueBatchRequest, EnqueueBatchResponse>;
-  /** Atomic batch enqueue. Either every job is enqueued or none are. */
+  /**
+   * Atomic batch enqueue. Either every job is enqueued or none are.
+   *
+   * Use this when the jobs are coordinated steps and partial success would
+   * leave the system in an inconsistent state.
+   *
+   * gRPC status codes:
+   *   INVALID_ARGUMENT  - batch shape is malformed (empty, exceeds max_enqueue_batch)
+   *   UNAUTHENTICATED   - missing or invalid API key
+   *   INTERNAL          - server-side storage failure. Transient, but a retry
+   *                       may duplicate jobs that carry no idempotency_key.
+   */
   enqueueAtomic: handleUnaryCall<EnqueueBatchRequest, EnqueueAtomicResponse>;
-  /** Long-poll reserve. Returns zero or more jobs, or times out with an empty list. */
+  /**
+   * Long-poll reserve. Returns zero or more jobs, or times out with an empty list.
+   *
+   * gRPC status codes:
+   *   INVALID_ARGUMENT     - request shape is malformed
+   *   FAILED_PRECONDITION  - server is in strict mode and one or more requested
+   *                          queues are not declared
+   *   UNAUTHENTICATED      - missing or invalid API key
+   *   INTERNAL             - server-side storage failure
+   */
   reserve: handleUnaryCall<ReserveRequest, ReserveResponse>;
-  /** Acknowledge successful completion of a job. */
+  /**
+   * Acknowledge successful completion of a job.
+   *
+   * gRPC status codes:
+   *   INVALID_ARGUMENT     - request shape is malformed
+   *   NOT_FOUND            - no in-flight job with this id (already acked,
+   *                          lease expired and was reassigned, or never existed)
+   *   FAILED_PRECONDITION  - the attempt number does not match the current
+   *                          in-flight attempt (lease was reassigned)
+   *   UNAUTHENTICATED      - missing or invalid API key
+   *   INTERNAL             - server-side storage failure
+   */
   ack: handleUnaryCall<AckRequest, AckResponse>;
-  /** Negative-acknowledge with retry directive. */
+  /** Negative-acknowledge with retry directive. Same status codes as Ack. */
   nack: handleUnaryCall<NackRequest, NackResponse>;
-  /** Extend the lease on an in-flight job. */
+  /** Extend the lease on an in-flight job. Same status codes as Ack. */
   extend: handleUnaryCall<ExtendRequest, ExtendResponse>;
-  /** Drain dead-lettered jobs for inspection and manual replay. */
+  /**
+   * Drain dead-lettered jobs for inspection and manual replay.
+   *
+   * Returns up to `max` DeadLetterRecords (oldest-first, optionally filtered to
+   * a single queue) and REMOVES them from the server in the same transaction
+   * before responding. This is destructive and privileged: there is no
+   * redelivery token (unlike Reserve/Ack), so a dropped response permanently
+   * removes the jobs.
+   *
+   * An empty list means nothing matched, which is indistinguishable from
+   * dead-letter retention being disabled — check dead_letter_retention_enabled
+   * in GetServerInfo.
+   *
+   * gRPC status codes:
+   *   INVALID_ARGUMENT  - request shape is malformed
+   *   UNAUTHENTICATED   - missing or invalid API key
+   *   INTERNAL          - server-side storage failure
+   */
   drainDeadLetters: handleUnaryCall<DrainDeadLettersRequest, DrainDeadLettersResponse>;
-  /** Get server info and capabilities. */
+  /** Get server info and capabilities. INTERNAL on storage failure; otherwise infallible. */
   getServerInfo: handleUnaryCall<GetServerInfoRequest, GetServerInfoResponse>;
 }
 
 export interface QueueServiceClient extends Client {
   /**
    * Best-effort batch enqueue. Accepts multiple jobs in one request and
-   * returns an individual success or rejection per job.
+   * returns an individual success or rejection per job. Use this for
+   * fan-out batches of independent jobs where partial success is fine.
+   *
+   * Whole-batch failures use gRPC status codes:
+   *   INVALID_ARGUMENT  - batch shape is malformed (empty, exceeds max_enqueue_batch)
+   *   UNAUTHENTICATED   - missing or invalid API key
+   *   INTERNAL          - server-side storage failure. Transient, but a retry
+   *                       may duplicate jobs that carry no idempotency_key.
    */
   enqueueBatch(
     request: EnqueueBatchRequest,
@@ -5086,7 +5494,18 @@ export interface QueueServiceClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: EnqueueBatchResponse) => void,
   ): ClientUnaryCall;
-  /** Atomic batch enqueue. Either every job is enqueued or none are. */
+  /**
+   * Atomic batch enqueue. Either every job is enqueued or none are.
+   *
+   * Use this when the jobs are coordinated steps and partial success would
+   * leave the system in an inconsistent state.
+   *
+   * gRPC status codes:
+   *   INVALID_ARGUMENT  - batch shape is malformed (empty, exceeds max_enqueue_batch)
+   *   UNAUTHENTICATED   - missing or invalid API key
+   *   INTERNAL          - server-side storage failure. Transient, but a retry
+   *                       may duplicate jobs that carry no idempotency_key.
+   */
   enqueueAtomic(
     request: EnqueueBatchRequest,
     callback: (error: ServiceError | null, response: EnqueueAtomicResponse) => void,
@@ -5102,7 +5521,16 @@ export interface QueueServiceClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: EnqueueAtomicResponse) => void,
   ): ClientUnaryCall;
-  /** Long-poll reserve. Returns zero or more jobs, or times out with an empty list. */
+  /**
+   * Long-poll reserve. Returns zero or more jobs, or times out with an empty list.
+   *
+   * gRPC status codes:
+   *   INVALID_ARGUMENT     - request shape is malformed
+   *   FAILED_PRECONDITION  - server is in strict mode and one or more requested
+   *                          queues are not declared
+   *   UNAUTHENTICATED      - missing or invalid API key
+   *   INTERNAL             - server-side storage failure
+   */
   reserve(
     request: ReserveRequest,
     callback: (error: ServiceError | null, response: ReserveResponse) => void,
@@ -5118,7 +5546,18 @@ export interface QueueServiceClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: ReserveResponse) => void,
   ): ClientUnaryCall;
-  /** Acknowledge successful completion of a job. */
+  /**
+   * Acknowledge successful completion of a job.
+   *
+   * gRPC status codes:
+   *   INVALID_ARGUMENT     - request shape is malformed
+   *   NOT_FOUND            - no in-flight job with this id (already acked,
+   *                          lease expired and was reassigned, or never existed)
+   *   FAILED_PRECONDITION  - the attempt number does not match the current
+   *                          in-flight attempt (lease was reassigned)
+   *   UNAUTHENTICATED      - missing or invalid API key
+   *   INTERNAL             - server-side storage failure
+   */
   ack(request: AckRequest, callback: (error: ServiceError | null, response: AckResponse) => void): ClientUnaryCall;
   ack(
     request: AckRequest,
@@ -5131,7 +5570,7 @@ export interface QueueServiceClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: AckResponse) => void,
   ): ClientUnaryCall;
-  /** Negative-acknowledge with retry directive. */
+  /** Negative-acknowledge with retry directive. Same status codes as Ack. */
   nack(request: NackRequest, callback: (error: ServiceError | null, response: NackResponse) => void): ClientUnaryCall;
   nack(
     request: NackRequest,
@@ -5144,7 +5583,7 @@ export interface QueueServiceClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: NackResponse) => void,
   ): ClientUnaryCall;
-  /** Extend the lease on an in-flight job. */
+  /** Extend the lease on an in-flight job. Same status codes as Ack. */
   extend(
     request: ExtendRequest,
     callback: (error: ServiceError | null, response: ExtendResponse) => void,
@@ -5160,7 +5599,24 @@ export interface QueueServiceClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: ExtendResponse) => void,
   ): ClientUnaryCall;
-  /** Drain dead-lettered jobs for inspection and manual replay. */
+  /**
+   * Drain dead-lettered jobs for inspection and manual replay.
+   *
+   * Returns up to `max` DeadLetterRecords (oldest-first, optionally filtered to
+   * a single queue) and REMOVES them from the server in the same transaction
+   * before responding. This is destructive and privileged: there is no
+   * redelivery token (unlike Reserve/Ack), so a dropped response permanently
+   * removes the jobs.
+   *
+   * An empty list means nothing matched, which is indistinguishable from
+   * dead-letter retention being disabled — check dead_letter_retention_enabled
+   * in GetServerInfo.
+   *
+   * gRPC status codes:
+   *   INVALID_ARGUMENT  - request shape is malformed
+   *   UNAUTHENTICATED   - missing or invalid API key
+   *   INTERNAL          - server-side storage failure
+   */
   drainDeadLetters(
     request: DrainDeadLettersRequest,
     callback: (error: ServiceError | null, response: DrainDeadLettersResponse) => void,
@@ -5176,7 +5632,7 @@ export interface QueueServiceClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: DrainDeadLettersResponse) => void,
   ): ClientUnaryCall;
-  /** Get server info and capabilities. */
+  /** Get server info and capabilities. INTERNAL on storage failure; otherwise infallible. */
   getServerInfo(
     request: GetServerInfoRequest,
     callback: (error: ServiceError | null, response: GetServerInfoResponse) => void,

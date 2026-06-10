@@ -140,6 +140,11 @@ describe("jobRejectionFromPb", () => {
       kind: "invalid_request",
       message: "oops",
     });
+    expect(jobRejectionFromPb({ queueFull: { queue: "emails", limit: 1000n } })).toEqual({
+      kind: "queue_full",
+      queue: "emails",
+      limit: 1000,
+    });
     expect(jobRejectionFromPb({})).toEqual({ kind: "unknown" });
   });
 });
@@ -271,10 +276,20 @@ describe("deadLetterRecordFromPb", () => {
     expect(Array.from(replay.payload?.data ?? [])).toEqual([1, 2, 3]);
   });
 
+  it("maps the admin cause", () => {
+    const r = deadLetterRecordFromPb({
+      job: validPbJob(),
+      cause: DeadLetterCause.DEAD_LETTER_CAUSE_ADMIN,
+      failedAt: new Date(1_700_000_100_000),
+      finalAttempt: 1,
+    });
+    expect(r.cause).toBe("admin");
+  });
+
   it("maps an unknown cause to unspecified", () => {
     const r = deadLetterRecordFromPb({
       job: validPbJob(),
-      cause: 9999 as DeadLetterCause,
+      cause: 99 as DeadLetterCause,
       failedAt: new Date(1_700_000_100_000),
       finalAttempt: 1,
     });
