@@ -145,6 +145,10 @@ describe("jobRejectionFromPb", () => {
       queue: "emails",
       limit: 1000,
     });
+    expect(jobRejectionFromPb({ queueClosing: { queue: "emails" } })).toEqual({
+      kind: "queue_closing",
+      queue: "emails",
+    });
     expect(jobRejectionFromPb({})).toEqual({ kind: "unknown" });
   });
 });

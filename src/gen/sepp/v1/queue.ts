@@ -168,11 +168,12 @@ export interface Job_CustomEntry {
 
 /**
  * Reason a single job in an enqueue batch was rejected. Every variant except
- * queue_full is deterministic: retrying the same job against the same server
- * configuration produces the same outcome. queue_full reflects queue depth at
- * admission time and clears once the queue drains. Transient server failures
- * (e.g. storage outage) are still reported as a whole-batch gRPC error, never
- * as a JobRejection.
+ * queue_full and queue_closing is deterministic: retrying the same job against
+ * the same server configuration produces the same outcome. queue_full reflects
+ * queue depth at admission time and clears once the queue drains; queue_closing
+ * reflects an in-progress queue deletion and clears once that finishes or is
+ * abandoned. Transient server failures (e.g. storage outage) are still reported
+ * as a whole-batch gRPC error, never as a JobRejection.
  *
  * Servers may add rejection reasons over time. Clients must treat a rejection
  * whose reason they do not recognize as a rejection of unknown kind, not as a
@@ -228,10 +229,19 @@ export interface JobRejection {
     | InvalidRequest
     | undefined;
   /**
-   * The target queue is at capacity (max_queue_depth). The only
-   * non-deterministic rejection: it clears once the queue drains.
+   * The target queue is at capacity (max_queue_depth). Non-deterministic:
+   * it clears once the queue drains.
    */
-  queueFull?: QueueFull | undefined;
+  queueFull?:
+    | QueueFull
+    | undefined;
+  /**
+   * The target queue is being deleted (an operator delete is draining it),
+   * so it is not currently accepting new jobs. Non-deterministic: it clears
+   * once the delete completes or is abandoned. Retry against another queue,
+   * or retry this queue after the delete finishes.
+   */
+  queueClosing?: QueueClosing | undefined;
 }
 
 export interface UnknownQueue {
@@ -307,6 +317,10 @@ export interface QueueFull {
   queue: string;
   /** The queue's configured max_queue_depth. */
   limit: bigint;
+}
+
+export interface QueueClosing {
+  queue: string;
 }
 
 /** Enqueue a job for processing. */
@@ -1334,6 +1348,7 @@ function createBaseJobRejection(): JobRejection {
     scheduledTooFar: undefined,
     invalidRequest: undefined,
     queueFull: undefined,
+    queueClosing: undefined,
   };
 }
 
@@ -1377,6 +1392,9 @@ export const JobRejection: MessageFns<JobRejection> = {
     }
     if (message.queueFull !== undefined) {
       QueueFull.encode(message.queueFull, writer.uint32(106).fork()).join();
+    }
+    if (message.queueClosing !== undefined) {
+      QueueClosing.encode(message.queueClosing, writer.uint32(114).fork()).join();
     }
     return writer;
   },
@@ -1492,6 +1510,14 @@ export const JobRejection: MessageFns<JobRejection> = {
           message.queueFull = QueueFull.decode(reader, reader.uint32());
           continue;
         }
+        case 14: {
+          if (tag !== 114) {
+            break;
+          }
+
+          message.queueClosing = QueueClosing.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1568,6 +1594,11 @@ export const JobRejection: MessageFns<JobRejection> = {
         : isSet(object.queue_full)
         ? QueueFull.fromJSON(object.queue_full)
         : undefined,
+      queueClosing: isSet(object.queueClosing)
+        ? QueueClosing.fromJSON(object.queueClosing)
+        : isSet(object.queue_closing)
+        ? QueueClosing.fromJSON(object.queue_closing)
+        : undefined,
     };
   },
 
@@ -1611,6 +1642,9 @@ export const JobRejection: MessageFns<JobRejection> = {
     }
     if (message.queueFull !== undefined) {
       obj.queueFull = QueueFull.toJSON(message.queueFull);
+    }
+    if (message.queueClosing !== undefined) {
+      obj.queueClosing = QueueClosing.toJSON(message.queueClosing);
     }
     return obj;
   },
@@ -1659,6 +1693,9 @@ export const JobRejection: MessageFns<JobRejection> = {
       : undefined;
     message.queueFull = (object.queueFull !== undefined && object.queueFull !== null)
       ? QueueFull.fromPartial(object.queueFull)
+      : undefined;
+    message.queueClosing = (object.queueClosing !== undefined && object.queueClosing !== null)
+      ? QueueClosing.fromPartial(object.queueClosing)
       : undefined;
     return message;
   },
@@ -2661,6 +2698,64 @@ export const QueueFull: MessageFns<QueueFull> = {
     const message = createBaseQueueFull();
     message.queue = object.queue ?? "";
     message.limit = object.limit ?? 0n;
+    return message;
+  },
+};
+
+function createBaseQueueClosing(): QueueClosing {
+  return { queue: "" };
+}
+
+export const QueueClosing: MessageFns<QueueClosing> = {
+  encode(message: QueueClosing, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.queue !== "") {
+      writer.uint32(10).string(message.queue);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): QueueClosing {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseQueueClosing();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.queue = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): QueueClosing {
+    return { queue: isSet(object.queue) ? globalThis.String(object.queue) : "" };
+  },
+
+  toJSON(message: QueueClosing): unknown {
+    const obj: any = {};
+    if (message.queue !== "") {
+      obj.queue = message.queue;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<QueueClosing>, I>>(base?: I): QueueClosing {
+    return QueueClosing.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<QueueClosing>, I>>(object: I): QueueClosing {
+    const message = createBaseQueueClosing();
+    message.queue = object.queue ?? "";
     return message;
   },
 };

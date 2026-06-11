@@ -1,7 +1,7 @@
 version: v2
 clean: true
 inputs:
-  - module: buf.build/sepp-org/sepp-proto:v1.1.2
+  - module: buf.build/sepp-org/sepp-proto:v1.2.0
 plugins:
   # protoc-gen-ts_proto ships with the `ts-proto` dev dependency and is resolved
   # from node_modules/.bin when this runs via `npm run gen`.

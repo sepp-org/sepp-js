@@ -274,6 +274,7 @@ export function jobRejectionFromPb(r: PbJobRejection): JobRejection {
       limit: bigintToNumber(r.queueFull.limit),
     };
   }
+  if (r.queueClosing) return { kind: "queue_closing", queue: r.queueClosing.queue };
   return { kind: "unknown" };
 }
 

@@ -131,6 +131,8 @@ export class Worker {
     });
     if (opts.leaseDuration <= 0)
       throw new ValidationError("leaseDuration must be at least 1ms");
+    if (opts.maxJobs !== undefined && opts.maxJobs < 1)
+      throw new ValidationError("maxJobs must be at least 1");
     if (opts.workerId !== undefined && opts.workerId.length === 0) {
       throw new ValidationError("workerId must not be empty when set");
     }
@@ -376,10 +378,14 @@ export class Worker {
   }
 
   async #heartbeat(ctx: JobCtx, hbStop: AbortSignal): Promise<void> {
-    const interval =
-      this.#autoExtendInterval ??
-      Math.max(1, Math.floor(this.#leaseDuration / 3));
     while (!hbStop.aborted) {
+      // The default interval tracks the GRANTED lease (_knownExpiryMs, which each
+      // extend updates to the server-clamped value), not the requested
+      // leaseDuration: a clamped lease must be refreshed before it lapses, not
+      // after a third of the larger requested lease.
+      const interval =
+        this.#autoExtendInterval ??
+        Math.max(1, Math.floor((ctx._knownExpiryMs - Date.now()) / 3));
       await sleepUntil(interval, hbStop);
       if (hbStop.aborted) return;
       try {
