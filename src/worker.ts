@@ -221,9 +221,10 @@ export class Worker {
         waitTimeout: this.#waitTimeout,
         workerId: this.#workerId,
       };
-      if (this.#maxJobs !== undefined) {
-        reserveOpts.maxJobs = Math.min(this.#maxJobs, 1 + sem.available);
-      }
+      const capacity = 1 + sem.available;
+      reserveOpts.maxJobs = this.#maxJobs !== undefined
+        ? Math.min(this.#maxJobs, capacity)
+        : capacity;
 
       let jobs: Job[] | null;
       try {
