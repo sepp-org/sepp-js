@@ -1,12 +1,12 @@
-import { status } from "@grpc/grpc-js";
 import type { ServiceError } from "@grpc/grpc-js";
+import { status } from "@grpc/grpc-js";
 import { describe, expect, it } from "vitest";
 
 import {
+  AttemptMismatchError,
   asClientError,
   asLeaseError,
   asReserveError,
-  AttemptMismatchError,
   InvalidRequestError,
   isTransientStatus,
   JobNotFoundError,
@@ -24,7 +24,12 @@ function svc(code: number, message = "x"): ServiceError {
 
 describe("clientErrorFromStatus (via asClientError)", () => {
   it("maps transport-ish codes to TransportError", () => {
-    for (const c of [status.UNAVAILABLE, status.DEADLINE_EXCEEDED, status.ABORTED, status.CANCELLED]) {
+    for (const c of [
+      status.UNAVAILABLE,
+      status.DEADLINE_EXCEEDED,
+      status.ABORTED,
+      status.CANCELLED,
+    ]) {
       expect(asClientError(svc(c))).toBeInstanceOf(TransportError);
     }
   });
@@ -82,7 +87,12 @@ describe("asReserveError", () => {
 
 describe("isTransientStatus", () => {
   it("classifies retryable codes", () => {
-    for (const c of [status.UNAVAILABLE, status.DEADLINE_EXCEEDED, status.ABORTED, status.RESOURCE_EXHAUSTED]) {
+    for (const c of [
+      status.UNAVAILABLE,
+      status.DEADLINE_EXCEEDED,
+      status.ABORTED,
+      status.RESOURCE_EXHAUSTED,
+    ]) {
       expect(isTransientStatus(c)).toBe(true);
     }
     for (const c of [

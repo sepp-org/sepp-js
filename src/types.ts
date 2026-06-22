@@ -1,10 +1,6 @@
 /** The public value types and input shapes. */
 import { currentTraceContext, getOtel, validateTraceparent } from "./trace";
 
-// ---------------------------------------------------------------------------
-// Payload
-// ---------------------------------------------------------------------------
-
 /**
  * The opaque body of a job, plus an encoding hint.
  *
@@ -44,10 +40,6 @@ export class Payload {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Priority & Primitive
-// ---------------------------------------------------------------------------
-
 /**
  * Job priority constants. Priorities run 0 (lowest) to 9 (highest, dequeued
  * first). Anywhere a priority is accepted you may pass a plain number 0–9.
@@ -76,10 +68,6 @@ export const Priority = {
  * `bigint`.
  */
 export type Primitive = string | number | boolean | bigint;
-
-// ---------------------------------------------------------------------------
-// Trace context
-// ---------------------------------------------------------------------------
 
 /**
  * A W3C Trace Context attached to a job, linking a producer's trace to the
@@ -118,10 +106,6 @@ export class TraceContext {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Enqueue request & ack
-// ---------------------------------------------------------------------------
-
 /** A job to enqueue. Required fields first; everything else is optional. */
 export interface EnqueueRequest {
   /** Target queue (non-empty). */
@@ -151,10 +135,6 @@ export interface EnqueueAck {
   /** True if an idempotency key matched an existing job, so this enqueue was a no-op. */
   deduplicated: boolean;
 }
-
-// ---------------------------------------------------------------------------
-// Job rejections (per-job, deterministic)
-// ---------------------------------------------------------------------------
 
 /**
  * Why the server refused a single job. A discriminated union keyed on `kind`;
@@ -230,10 +210,6 @@ export function describeJobRejection(r: JobRejection): string {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Reserve options
-// ---------------------------------------------------------------------------
-
 /** Parameters for a {@link SeppClient.reserve} call. */
 export interface ReserveOptions {
   /** Queues to pull from, polled in order: index 0 first, then index 1, etc. */
@@ -247,10 +223,6 @@ export interface ReserveOptions {
   /** Maximum jobs to return in one response (default 1). The server clamps to its max. */
   maxJobs?: number;
 }
-
-// ---------------------------------------------------------------------------
-// Reserved jobs & lease handle
-// ---------------------------------------------------------------------------
 
 /** @internal Extends a lease and returns the new expiry. Wired up by the client. */
 export type LeaseExtendFn = (
@@ -361,10 +333,6 @@ export interface Job {
   ctx: JobCtx;
 }
 
-// ---------------------------------------------------------------------------
-// Nack retry directive
-// ---------------------------------------------------------------------------
-
 /**
  * How the server should handle a nacked job's next delivery. This is job-level
  * retry (the handler failed), distinct from {@link RetryPolicy} (the RPC failed).
@@ -390,10 +358,6 @@ export class RetryDirective {
     return new RetryDirective("dead_letter");
   }
 }
-
-// ---------------------------------------------------------------------------
-// Server info
-// ---------------------------------------------------------------------------
 
 /** The server's version, capabilities, and limits, from {@link SeppClient.getServerInfo}. */
 export interface ServerInfo {
@@ -421,10 +385,6 @@ export interface ServerInfo {
   strictQueues: boolean;
   deadLetterRetentionEnabled: boolean;
 }
-
-// ---------------------------------------------------------------------------
-// Dead-letter records
-// ---------------------------------------------------------------------------
 
 /** Why a job was moved to the dead-letter store. */
 export type DeadLetterCause =

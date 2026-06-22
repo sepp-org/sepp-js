@@ -6,8 +6,9 @@
  * auth, TLS, and a {@link RetryPolicy}. Every method returns a promise and the
  * client may be shared freely across concurrent work.
  */
-import { credentials as grpcCredentials, Metadata } from "@grpc/grpc-js";
+
 import type { CallOptions, ChannelCredentials, ChannelOptions, ServiceError } from "@grpc/grpc-js";
+import { credentials as grpcCredentials, Metadata } from "@grpc/grpc-js";
 
 import {
   ackFromPb,
@@ -34,11 +35,11 @@ import {
   MalformedResponseError,
 } from "./errors";
 import {
-  type DeadLetterRecord as PbDeadLetterRecord,
   type EnqueueAtomicResponse,
   type EnqueueBatchResponse,
   type ExtendResponse,
   type GetServerInfoResponse,
+  type DeadLetterRecord as PbDeadLetterRecord,
   QueueServiceClient,
   type ReserveResponse,
 } from "./gen/sepp/v1/queue";
@@ -51,8 +52,8 @@ import {
   isJobRejection,
   type Job,
   type JobRejection,
-  RetryDirective,
   type ReserveOptions,
+  RetryDirective,
   type ServerInfo,
 } from "./types";
 import { USER_AGENT } from "./version";
@@ -115,8 +116,10 @@ export interface DrainOptions {
 }
 
 function parseAddress(addr: string): { target: string; impliesTls: boolean } {
-  if (addr.startsWith("http://")) return { target: addr.slice("http://".length), impliesTls: false };
-  if (addr.startsWith("https://")) return { target: addr.slice("https://".length), impliesTls: true };
+  if (addr.startsWith("http://"))
+    return { target: addr.slice("http://".length), impliesTls: false };
+  if (addr.startsWith("https://"))
+    return { target: addr.slice("https://".length), impliesTls: true };
   return { target: addr, impliesTls: false };
 }
 
@@ -227,10 +230,6 @@ export class SeppClient {
     this.#client.close();
   }
 
-  // -------------------------------------------------------------------------
-  // Producer
-  // -------------------------------------------------------------------------
-
   /**
    * Enqueues a batch of jobs on a best-effort basis. The returned array has one
    * entry per submitted job, in order, each either an {@link EnqueueAck} or a
@@ -307,10 +306,6 @@ export class SeppClient {
     }
     throw new MalformedResponseError("missing outcome in EnqueueAtomicResponse");
   }
-
-  // -------------------------------------------------------------------------
-  // Consumer
-  // -------------------------------------------------------------------------
 
   /**
    * Long-polls for jobs to process. Resolves with one or more leased jobs, or
@@ -395,7 +390,12 @@ export class SeppClient {
     extensionMs: number,
     workerId: string | undefined,
   ): Promise<Date> => {
-    const req = { jobId, attempt, leaseDuration: msToDuration(extensionMs), workerId };
+    const req = {
+      jobId,
+      attempt,
+      leaseDuration: msToDuration(extensionMs),
+      workerId,
+    };
     let response: ExtendResponse;
     try {
       response = await withRetry(this.#retry, () =>
@@ -409,10 +409,6 @@ export class SeppClient {
     }
     return response.leaseExpiresAt;
   };
-
-  // -------------------------------------------------------------------------
-  // Admin
-  // -------------------------------------------------------------------------
 
   /** Fetches the server's version, capabilities, and limits. */
   async getServerInfo(): Promise<ServerInfo> {
@@ -458,10 +454,6 @@ export class SeppClient {
     return records;
   }
 
-  // -------------------------------------------------------------------------
-  // Internals
-  // -------------------------------------------------------------------------
-
   #buildMetadata(): Metadata {
     const md = new Metadata();
     if (this.#bearer) md.set("authorization", this.#bearer);
@@ -474,7 +466,11 @@ export class SeppClient {
   }
 
   #unary<Res>(
-    start: (md: Metadata, opts: Partial<CallOptions>, cb: (e: ServiceError | null, r?: Res) => void) => void,
+    start: (
+      md: Metadata,
+      opts: Partial<CallOptions>,
+      cb: (e: ServiceError | null, r?: Res) => void,
+    ) => void,
     options?: Partial<CallOptions>,
   ): Promise<Res> {
     // Deadline is computed per attempt so each retry gets a full window.

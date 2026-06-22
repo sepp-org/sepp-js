@@ -7,8 +7,9 @@
  * auto-extension, graceful shutdown via a {@link ShutdownHandle}, and (when
  * `@opentelemetry/api` is present) a linked CONSUMER span per job.
  */
-import { hostname } from "node:os";
+
 import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 
 import type { SeppClient } from "./client";
 import {
@@ -18,19 +19,10 @@ import {
   ValidationError,
 } from "./errors";
 import { getOtel, loadOtel, spanContextFromTraceparent } from "./trace";
-import {
-  type Job,
-  type JobCtx,
-  type Payload,
-  type ReserveOptions,
-  RetryDirective,
-} from "./types";
+import { type Job, type JobCtx, type Payload, type ReserveOptions, RetryDirective } from "./types";
 
 /** A job handler: resolves to ack the job, throws {@link HandlerError} (or anything) to nack it. */
-export type Handler = (
-  payload: Payload | undefined,
-  ctx: JobCtx,
-) => Promise<void>;
+export type Handler = (payload: Payload | undefined, ctx: JobCtx) => Promise<void>;
 
 /**
  * Thrown from a handler to nack its job, choosing how the server should retry.
@@ -123,14 +115,11 @@ export class Worker {
   readonly #shutdown = new ShutdownHandle();
 
   constructor(client: SeppClient, opts: WorkerOptions) {
-    if (opts.queues.length === 0)
-      throw new ValidationError("at least one queue must be specified");
+    if (opts.queues.length === 0) throw new ValidationError("at least one queue must be specified");
     opts.queues.forEach((q, i) => {
-      if (q.length === 0)
-        throw new ValidationError(`queue name at index ${i} must not be empty`);
+      if (q.length === 0) throw new ValidationError(`queue name at index ${i} must not be empty`);
     });
-    if (opts.leaseDuration <= 0)
-      throw new ValidationError("leaseDuration must be at least 1ms");
+    if (opts.leaseDuration <= 0) throw new ValidationError("leaseDuration must be at least 1ms");
     if (opts.maxJobs !== undefined && opts.maxJobs < 1)
       throw new ValidationError("maxJobs must be at least 1");
     if (opts.workerId !== undefined && opts.workerId.length === 0) {
@@ -145,12 +134,9 @@ export class Worker {
     this.#maxInFlight = Math.max(1, opts.maxInFlight ?? 16);
     this.#reserveErrorBackoff = opts.reserveErrorBackoff ?? 1000;
     this.#workerId = opts.workerId ?? defaultWorkerId();
-    this.#autoExtend =
-      opts.autoExtend === true || opts.autoExtendInterval !== undefined;
+    this.#autoExtend = opts.autoExtend === true || opts.autoExtendInterval !== undefined;
     this.#autoExtendInterval =
-      opts.autoExtendInterval !== undefined
-        ? Math.max(1, opts.autoExtendInterval)
-        : undefined;
+      opts.autoExtendInterval !== undefined ? Math.max(1, opts.autoExtendInterval) : undefined;
   }
 
   /** Registers the handler for a `jobType`. Throws if one is already registered. */
@@ -198,9 +184,7 @@ export class Worker {
     const spawn = (job: Job): void => {
       const p = this.#processJob(job)
         // eslint-disable-next-line no-console
-        .catch((err) =>
-          console.error("sepp worker: unexpected error processing job:", err),
-        )
+        .catch((err) => console.error("sepp worker: unexpected error processing job:", err))
         .finally(() => {
           sem.release();
           inFlight.delete(p);
@@ -222,9 +206,8 @@ export class Worker {
         workerId: this.#workerId,
       };
       const capacity = 1 + sem.available;
-      reserveOpts.maxJobs = this.#maxJobs !== undefined
-        ? Math.min(this.#maxJobs, capacity)
-        : capacity;
+      reserveOpts.maxJobs =
+        this.#maxJobs !== undefined ? Math.min(this.#maxJobs, capacity) : capacity;
 
       let jobs: Job[] | null;
       try {
@@ -276,10 +259,7 @@ export class Worker {
       },
     });
     try {
-      await api.context.with(
-        api.trace.setSpan(api.context.active(), span),
-        core,
-      );
+      await api.context.with(api.trace.setSpan(api.context.active(), span), core);
     } finally {
       span.end();
     }
@@ -289,9 +269,7 @@ export class Worker {
     const handler = this.#handlers.get(ctx.jobType) ?? this.#catchAll;
     if (!handler) {
       // eslint-disable-next-line no-console
-      console.warn(
-        `sepp worker: no handler registered for job_type '${ctx.jobType}'`,
-      );
+      console.warn(`sepp worker: no handler registered for job_type '${ctx.jobType}'`);
       try {
         await this.#client.nack(ctx, {
           reason: "no handler registered for job_type",
@@ -316,9 +294,7 @@ export class Worker {
       }
       if (ctx._leaseLost) {
         // eslint-disable-next-line no-console
-        console.error(
-          "sepp worker: lease lost; skipping ack/nack (job will be redelivered)",
-        );
+        console.error("sepp worker: lease lost; skipping ack/nack (job will be redelivered)");
         return;
       }
     } else {
@@ -385,17 +361,13 @@ export class Worker {
       // leaseDuration: a clamped lease must be refreshed before it lapses, not
       // after a third of the larger requested lease.
       const interval =
-        this.#autoExtendInterval ??
-        Math.max(1, Math.floor((ctx._knownExpiryMs - Date.now()) / 3));
+        this.#autoExtendInterval ?? Math.max(1, Math.floor((ctx._knownExpiryMs - Date.now()) / 3));
       await sleepUntil(interval, hbStop);
       if (hbStop.aborted) return;
       try {
         await ctx.extend(this.#leaseDuration);
       } catch (err) {
-        if (
-          err instanceof AttemptMismatchError ||
-          err instanceof JobNotFoundError
-        ) {
+        if (err instanceof AttemptMismatchError || err instanceof JobNotFoundError) {
           // eslint-disable-next-line no-console
           console.error(
             "sepp worker: lease reassigned by server; aborting handler to avoid double processing",
@@ -405,17 +377,12 @@ export class Worker {
         }
         if (Date.now() >= ctx._knownExpiryMs) {
           // eslint-disable-next-line no-console
-          console.error(
-            "sepp worker: lease lost; aborting handler to avoid double processing",
-          );
+          console.error("sepp worker: lease lost; aborting handler to avoid double processing");
           ctx._markLeaseLost();
           return;
         }
         // eslint-disable-next-line no-console
-        console.warn(
-          "sepp worker: lease extend failed; lease still valid, will retry:",
-          err,
-        );
+        console.warn("sepp worker: lease extend failed; lease still valid, will retry:", err);
       }
     }
   }

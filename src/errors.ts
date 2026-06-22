@@ -3,11 +3,11 @@
  *
  * Every error thrown by this library descends from {@link SeppError}. Transport
  * and protocol failures are {@link ClientError}s; lease, reserve, and enqueue
- * operations add their own typed errors on top. gRPC status codes are mapped
- * onto these the same way the Rust client maps them.
+ * operations add their own typed errors on top.
  */
-import { status as GrpcStatus } from "@grpc/grpc-js";
+
 import type { ServiceError } from "@grpc/grpc-js";
+import { status as GrpcStatus } from "@grpc/grpc-js";
 
 import type { JobRejection, JobValidationError } from "./types";
 
@@ -18,10 +18,6 @@ export class SeppError extends Error {
     this.name = new.target.name;
   }
 }
-
-// ---------------------------------------------------------------------------
-// Transport / protocol errors (shared by most RPCs)
-// ---------------------------------------------------------------------------
 
 /** A transport- or protocol-level failure, shared by most RPCs. */
 export class ClientError extends SeppError {}
@@ -95,10 +91,6 @@ export class MalformedResponseError extends ClientError {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Decoding errors
-// ---------------------------------------------------------------------------
-
 /** A job received from the server could not be decoded into a {@link Job}. */
 export class JobConversionError extends SeppError {}
 
@@ -134,19 +126,11 @@ export class AttemptMismatchError extends LeaseError {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Reserve errors
-// ---------------------------------------------------------------------------
-
 /** Base for reserve failures. */
 export class ReserveError extends SeppError {}
 
 /** The server is in strict mode and one or more requested queues are not declared. */
 export class UnknownQueuesError extends ReserveError {}
-
-// ---------------------------------------------------------------------------
-// Enqueue errors
-// ---------------------------------------------------------------------------
 
 /** Thrown by {@link SeppClient.enqueue} when the server rejects the single job. */
 export class JobRejectedError extends SeppError {
@@ -161,10 +145,6 @@ export class BatchValidationError extends SeppError {
     super(`atomic batch rejected: ${errors.length} job(s) failed validation`);
   }
 }
-
-// ---------------------------------------------------------------------------
-// Client-side validation errors
-// ---------------------------------------------------------------------------
 
 /** A value supplied by the caller failed client-side validation before any RPC was made. */
 export class ValidationError extends SeppError {}
@@ -185,10 +165,6 @@ export class DuplicateHandlerError extends SeppError {
     super(`handler for job_type "${jobType}" is already registered`);
   }
 }
-
-// ---------------------------------------------------------------------------
-// gRPC status → error mapping
-// ---------------------------------------------------------------------------
 
 function isServiceError(e: unknown): e is ServiceError {
   return typeof e === "object" && e !== null && typeof (e as { code?: unknown }).code === "number";

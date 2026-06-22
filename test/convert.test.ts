@@ -15,8 +15,17 @@ import {
   serverInfoFromPb,
   validatePriority,
 } from "../src/convert";
-import { JobConversionError, PriorityRangeError, ServerInfoError, ValidationError } from "../src/errors";
-import { DeadLetterCause, type GetServerInfoResponse, type Job as PbJob } from "../src/gen/sepp/v1/queue";
+import {
+  JobConversionError,
+  PriorityRangeError,
+  ServerInfoError,
+  ValidationError,
+} from "../src/errors";
+import {
+  DeadLetterCause,
+  type GetServerInfoResponse,
+  type Job as PbJob,
+} from "../src/gen/sepp/v1/queue";
 import { Payload, RetryDirective, TraceContext } from "../src/types";
 
 const VALID_TP = "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01";
@@ -121,7 +130,10 @@ describe("enqueueRequestToPb", () => {
 
 describe("ackFromPb", () => {
   it("maps job id and dedup flag", () => {
-    expect(ackFromPb({ jobId: "abc", deduplicated: true })).toEqual({ jobId: "abc", deduplicated: true });
+    expect(ackFromPb({ jobId: "abc", deduplicated: true })).toEqual({
+      jobId: "abc",
+      deduplicated: true,
+    });
   });
 });
 
@@ -164,7 +176,9 @@ describe("reserveOptionsToPb", () => {
 
   it("validates queues and lease", () => {
     expect(() => reserveOptionsToPb({ queues: [], leaseDuration: 1000 })).toThrow(ValidationError);
-    expect(() => reserveOptionsToPb({ queues: ["ok", ""], leaseDuration: 1000 })).toThrow(ValidationError);
+    expect(() => reserveOptionsToPb({ queues: ["ok", ""], leaseDuration: 1000 })).toThrow(
+      ValidationError,
+    );
     expect(() => reserveOptionsToPb({ queues: ["q"], leaseDuration: 0 })).toThrow(ValidationError);
   });
 });
@@ -185,22 +199,32 @@ describe("jobFromPb", () => {
   });
 
   it("rejects missing id / job type", () => {
-    expect(() => jobFromPb(noopExtend, { ...validPbJob(), id: "" }, undefined)).toThrow(JobConversionError);
-    expect(() => jobFromPb(noopExtend, { ...validPbJob(), jobType: "" }, undefined)).toThrow(JobConversionError);
-  });
-
-  it("rejects out-of-range priority", () => {
-    expect(() => jobFromPb(noopExtend, { ...validPbJob(), priority: 10 }, undefined)).toThrow(JobConversionError);
-  });
-
-  it("rejects a pre-epoch timestamp", () => {
-    expect(() => jobFromPb(noopExtend, { ...validPbJob(), enqueuedAt: new Date(-1000) }, undefined)).toThrow(
+    expect(() => jobFromPb(noopExtend, { ...validPbJob(), id: "" }, undefined)).toThrow(
+      JobConversionError,
+    );
+    expect(() => jobFromPb(noopExtend, { ...validPbJob(), jobType: "" }, undefined)).toThrow(
       JobConversionError,
     );
   });
 
+  it("rejects out-of-range priority", () => {
+    expect(() => jobFromPb(noopExtend, { ...validPbJob(), priority: 10 }, undefined)).toThrow(
+      JobConversionError,
+    );
+  });
+
+  it("rejects a pre-epoch timestamp", () => {
+    expect(() =>
+      jobFromPb(noopExtend, { ...validPbJob(), enqueuedAt: new Date(-1000) }, undefined),
+    ).toThrow(JobConversionError);
+  });
+
   it("drops an invalid trace context but keeps the job", () => {
-    const job = jobFromPb(noopExtend, { ...validPbJob(), traceContext: { traceparent: "garbage" } }, undefined);
+    const job = jobFromPb(
+      noopExtend,
+      { ...validPbJob(), traceContext: { traceparent: "garbage" } },
+      undefined,
+    );
     expect(job.ctx.traceContext).toBeUndefined();
   });
 
@@ -255,7 +279,9 @@ describe("serverInfoFromPb", () => {
   });
 
   it("rejects an invalid server time", () => {
-    expect(() => serverInfoFromPb({ ...validInfo(), serverTime: new Date(-1) })).toThrow(ServerInfoError);
+    expect(() => serverInfoFromPb({ ...validInfo(), serverTime: new Date(-1) })).toThrow(
+      ServerInfoError,
+    );
   });
 });
 
@@ -315,6 +341,8 @@ describe("retryDirectiveToPb", () => {
   it("maps each strategy", () => {
     expect(retryDirectiveToPb(RetryDirective.default())).toEqual({ default: {} });
     expect(retryDirectiveToPb(RetryDirective.deadLetter())).toEqual({ deadLetter: {} });
-    expect(retryDirectiveToPb(RetryDirective.after(5000))).toEqual({ delay: { seconds: 5n, nanos: 0 } });
+    expect(retryDirectiveToPb(RetryDirective.after(5000))).toEqual({
+      delay: { seconds: 5n, nanos: 0 },
+    });
   });
 });

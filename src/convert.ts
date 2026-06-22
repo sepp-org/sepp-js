@@ -1,24 +1,25 @@
 /** Conversions between the generated protobuf messages and the domain types. */
+
+import { JobConversionError, PriorityRangeError, ServerInfoError, ValidationError } from "./errors";
 import type { Duration } from "./gen/google/protobuf/duration";
 import {
+  type GetServerInfoResponse,
+  type NackRetry,
   DeadLetterCause as PbDeadLetterCause,
   type DeadLetterRecord as PbDeadLetterRecord,
   type EnqueueRequest as PbEnqueueRequest,
   type EnqueueResponse as PbEnqueueResponse,
-  type GetServerInfoResponse,
   type Job as PbJob,
   type JobRejection as PbJobRejection,
   type JobValidationError as PbJobValidationError,
-  type NackRetry,
   type Payload as PbPayload,
-  type PrimitiveValue,
   type ReserveRequest as PbReserveRequest,
   type TraceContext as PbTraceContext,
+  type PrimitiveValue,
 } from "./gen/sepp/v1/queue";
-import { JobConversionError, PriorityRangeError, ServerInfoError, ValidationError } from "./errors";
 import {
-  DeadLetterRecord,
   type DeadLetterCause,
+  DeadLetterRecord,
   type EnqueueAck,
   type EnqueueRequest,
   type Job,
@@ -33,10 +34,6 @@ import {
   type ServerInfo,
   TraceContext,
 } from "./types";
-
-// ---------------------------------------------------------------------------
-// Time helpers (ms <-> proto Duration; proto Timestamp arrives as Date)
-// ---------------------------------------------------------------------------
 
 const NANOS_PER_MS = 1_000_000;
 
@@ -57,10 +54,6 @@ function bigintToNumber(value: bigint): number {
   return Number(value);
 }
 
-// ---------------------------------------------------------------------------
-// Priority
-// ---------------------------------------------------------------------------
-
 /** Validates a caller-supplied priority is an integer in 0–9. */
 export function validatePriority(value: number): number {
   if (!Number.isInteger(value) || value < 0 || value > 9) {
@@ -68,10 +61,6 @@ export function validatePriority(value: number): number {
   }
   return value;
 }
-
-// ---------------------------------------------------------------------------
-// Primitive (custom map values)
-// ---------------------------------------------------------------------------
 
 export function primitiveToPb(value: Primitive): PrimitiveValue {
   switch (typeof value) {
@@ -101,7 +90,9 @@ export function primitiveFromPb(value: PrimitiveValue, key: string): Primitive {
   throw new JobConversionError(`custom value for key \`${key}\` has no value set`);
 }
 
-function customToPb(custom: Record<string, Primitive> | undefined): { [k: string]: PrimitiveValue } {
+function customToPb(custom: Record<string, Primitive> | undefined): {
+  [k: string]: PrimitiveValue;
+} {
   const out: { [k: string]: PrimitiveValue } = {};
   if (custom) {
     for (const [k, v] of Object.entries(custom)) out[k] = primitiveToPb(v);
@@ -114,10 +105,6 @@ function customFromPb(custom: { [k: string]: PrimitiveValue }): Record<string, P
   for (const [k, v] of Object.entries(custom)) out[k] = primitiveFromPb(v, k);
   return out;
 }
-
-// ---------------------------------------------------------------------------
-// Payload & trace context
-// ---------------------------------------------------------------------------
 
 function payloadToPb(p: Payload): PbPayload {
   return { data: Buffer.from(p.data), encoding: p.encoding };
@@ -142,10 +129,6 @@ function traceContextFromPb(tc: PbTraceContext | undefined): TraceContext | unde
   }
 }
 
-// ---------------------------------------------------------------------------
-// Timestamps
-// ---------------------------------------------------------------------------
-
 /** A proto Timestamp arrives as a Date; require it to be present and representable (>= epoch). */
 function requireTimestamp(date: Date | undefined, field: string): Date {
   if (!date) {
@@ -159,16 +142,12 @@ function requireTimestamp(date: Date | undefined, field: string): Date {
   return date;
 }
 
-// ---------------------------------------------------------------------------
-// Enqueue request
-// ---------------------------------------------------------------------------
-
 export function enqueueRequestToPb(input: EnqueueRequest): PbEnqueueRequest {
   if (input.queue.length === 0) throw new ValidationError("queue name must not be empty");
   if (input.jobType.length === 0) throw new ValidationError("job type must not be empty");
   if (input.priority !== undefined) validatePriority(input.priority);
 
-  // A pre-epoch scheduled_at is dropped (treated as unset), matching the Rust client.
+  // A pre-epoch scheduled_at is dropped (treated as unset).
   const scheduledAt =
     input.scheduledAt && input.scheduledAt.getTime() >= 0 ? input.scheduledAt : undefined;
 
@@ -188,10 +167,6 @@ export function enqueueRequestToPb(input: EnqueueRequest): PbEnqueueRequest {
 export function ackFromPb(r: PbEnqueueResponse): EnqueueAck {
   return { jobId: r.jobId, deduplicated: r.deduplicated };
 }
-
-// ---------------------------------------------------------------------------
-// Job rejections
-// ---------------------------------------------------------------------------
 
 export function jobRejectionFromPb(r: PbJobRejection): JobRejection {
   if (r.unknownQueue) return { kind: "unknown_queue", queue: r.unknownQueue.queue };
@@ -285,10 +260,6 @@ export function jobValidationErrorFromPb(e: PbJobValidationError): JobValidation
   };
 }
 
-// ---------------------------------------------------------------------------
-// Reserve request
-// ---------------------------------------------------------------------------
-
 export function reserveOptionsToPb(input: ReserveOptions): PbReserveRequest {
   if (input.queues.length === 0) throw new ValidationError("at least one queue must be specified");
   input.queues.forEach((q, i) => {
@@ -308,10 +279,6 @@ export function reserveOptionsToPb(input: ReserveOptions): PbReserveRequest {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Reserved jobs
-// ---------------------------------------------------------------------------
-
 function priorityFromPb(value: number): number {
   if (!Number.isInteger(value) || value < 0 || value > 9) {
     throw new JobConversionError(`job priority ${value} is out of range (expected 0-9)`);
@@ -321,7 +288,8 @@ function priorityFromPb(value: number): number {
 
 export function jobFromPb(extend: LeaseExtendFn, j: PbJob, workerId: string | undefined): Job {
   if (j.id.length === 0) throw new JobConversionError("job is missing required field `id`");
-  if (j.jobType.length === 0) throw new JobConversionError("job is missing required field `job_type`");
+  if (j.jobType.length === 0)
+    throw new JobConversionError("job is missing required field `job_type`");
 
   const priority = priorityFromPb(j.priority);
   const enqueuedAt = requireTimestamp(j.enqueuedAt, "enqueued_at");
@@ -346,10 +314,6 @@ export function jobFromPb(extend: LeaseExtendFn, j: PbJob, workerId: string | un
 
   return { payload: j.payload ? payloadFromPb(j.payload) : undefined, ctx };
 }
-
-// ---------------------------------------------------------------------------
-// Server info
-// ---------------------------------------------------------------------------
 
 export function serverInfoFromPb(r: GetServerInfoResponse): ServerInfo {
   if (r.serverVersion.length === 0) {
@@ -385,10 +349,6 @@ export function serverInfoFromPb(r: GetServerInfoResponse): ServerInfo {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Dead-letter records
-// ---------------------------------------------------------------------------
-
 function deadLetterCauseFromPb(c: PbDeadLetterCause): DeadLetterCause {
   switch (c) {
     case PbDeadLetterCause.DEAD_LETTER_CAUSE_ATTEMPTS_EXHAUSTED:
@@ -408,7 +368,8 @@ export function deadLetterRecordFromPb(r: PbDeadLetterRecord): DeadLetterRecord 
   const j = r.job;
   if (!j) throw new JobConversionError("dead-letter record is missing required field `job`");
   if (j.id.length === 0) throw new JobConversionError("job is missing required field `id`");
-  if (j.jobType.length === 0) throw new JobConversionError("job is missing required field `job_type`");
+  if (j.jobType.length === 0)
+    throw new JobConversionError("job is missing required field `job_type`");
 
   const priority = priorityFromPb(j.priority);
   const enqueuedAt = requireTimestamp(j.enqueuedAt, "enqueued_at");
@@ -431,10 +392,6 @@ export function deadLetterRecordFromPb(r: PbDeadLetterRecord): DeadLetterRecord 
     lastReason: r.lastReason,
   });
 }
-
-// ---------------------------------------------------------------------------
-// Nack retry directive
-// ---------------------------------------------------------------------------
 
 export function retryDirectiveToPb(d: RetryDirective): NackRetry {
   switch (d.kind) {

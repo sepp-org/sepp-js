@@ -41,7 +41,11 @@ describe.skipIf(!ADDR)("integration", () => {
     });
     expect(ack.jobId).toBeTruthy();
 
-    const jobs = await client.reserve({ queues: [QUEUE], leaseDuration: 30_000, waitTimeout: 5_000 });
+    const jobs = await client.reserve({
+      queues: [QUEUE],
+      leaseDuration: 30_000,
+      waitTimeout: 5_000,
+    });
     expect(jobs).not.toBeNull();
     const job = jobs!.find((j) => j.ctx.jobType === jobType);
     expect(job).toBeDefined();
@@ -59,13 +63,14 @@ describe.skipIf(!ADDR)("integration", () => {
       resolveDone = r;
     });
 
-    const worker = new Worker(client, { queues: [QUEUE], leaseDuration: 30_000, waitTimeout: 2_000 }).handle(
-      jobType,
-      async (payload, ctx) => {
-        expect(payload?.text()).toBe("ping");
-        resolveDone(ctx.id);
-      },
-    );
+    const worker = new Worker(client, {
+      queues: [QUEUE],
+      leaseDuration: 30_000,
+      waitTimeout: 2_000,
+    }).handle(jobType, async (payload, ctx) => {
+      expect(payload?.text()).toBe("ping");
+      resolveDone(ctx.id);
+    });
     const handle = worker.shutdownHandle();
     const running = worker.run();
 

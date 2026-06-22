@@ -9,12 +9,12 @@ import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
 import {
   type CallOptions,
   type ChannelCredentials,
-  Client,
+  type Client,
   type ClientOptions,
   type ClientUnaryCall,
   type handleUnaryCall,
-  makeGenericClientConstructor,
   type Metadata,
+  makeGenericClientConstructor,
   type ServiceError,
   type UntypedServiceImplementation,
 } from "@grpc/grpc-js";
@@ -122,19 +122,13 @@ export interface Job {
   /** Type tag the producer set when enqueueing. */
   jobType: string;
   /** Opaque payload with encoding hint for the worker. */
-  payload?:
-    | Payload
-    | undefined;
+  payload?: Payload | undefined;
   /** Producer-set priority. 0 is lowest, 9 is highest. */
   priority: number;
   /** Trace context for tracing continuation. */
-  traceContext?:
-    | TraceContext
-    | undefined;
+  traceContext?: TraceContext | undefined;
   /** Wall-clock time when the producer enqueued this job. Always set. */
-  enqueuedAt?:
-    | Date
-    | undefined;
+  enqueuedAt?: Date | undefined;
   /** Which attempt at this job this delivery pertains to. 1 on first delivery, incremented on each redelivery. */
   attempt: number;
   /** How many attempts are allowed before this job goes to dead-letter. */
@@ -143,15 +137,11 @@ export interface Job {
    * Wall-clock time when the lease on this job expires. Always set.
    * If the worker has not acked/nacked/extended by this time, the job becomes available for redelivery.
    */
-  leaseExpiresAt?:
-    | Date
-    | undefined;
+  leaseExpiresAt?: Date | undefined;
   /** Custom key-value pairs. Keys are non-empty. */
   custom: { [key: string]: PrimitiveValue };
   /** Schedule for future execution. If unset, the job is available immediately. */
-  scheduledAt?:
-    | Date
-    | undefined;
+  scheduledAt?: Date | undefined;
   /**
    * The queue this job belongs to. Populated on jobs returned by Reserve and on
    * the job embedded in a DeadLetterRecord, so a worker reserving from several
@@ -181,60 +171,34 @@ export interface Job_CustomEntry {
  */
 export interface JobRejection {
   /** Strict mode is on and the target queue is not declared. */
-  unknownQueue?:
-    | UnknownQueue
-    | undefined;
+  unknownQueue?: UnknownQueue | undefined;
   /** payload.data exceeds the queue's max_payload_bytes. */
-  payloadTooLarge?:
-    | PayloadTooLarge
-    | undefined;
+  payloadTooLarge?: PayloadTooLarge | undefined;
   /** The queue restricts encodings and payload.encoding is not allowed. */
-  encodingNotAllowed?:
-    | EncodingNotAllowed
-    | undefined;
+  encodingNotAllowed?: EncodingNotAllowed | undefined;
   /** The queue restricts job_types and the requested job_type is not allowed. */
-  jobTypeNotAllowed?:
-    | JobTypeNotAllowed
-    | undefined;
+  jobTypeNotAllowed?: JobTypeNotAllowed | undefined;
   /** The custom map has more entries than the queue allows. */
-  customEntriesTooMany?:
-    | CustomEntriesTooMany
-    | undefined;
+  customEntriesTooMany?: CustomEntriesTooMany | undefined;
   /** Aggregate bytes of the custom map exceed the queue limit. */
-  customMapTooLarge?:
-    | CustomMapTooLarge
-    | undefined;
+  customMapTooLarge?: CustomMapTooLarge | undefined;
   /** A key in the custom map exceeds max_custom_key_bytes. */
-  customKeyTooLong?:
-    | CustomKeyTooLong
-    | undefined;
+  customKeyTooLong?: CustomKeyTooLong | undefined;
   /** queue name exceeds max_queue_name_bytes. */
-  queueNameTooLong?:
-    | QueueNameTooLong
-    | undefined;
+  queueNameTooLong?: QueueNameTooLong | undefined;
   /** job_type exceeds max_job_type_bytes. */
-  jobTypeNameTooLong?:
-    | JobTypeNameTooLong
-    | undefined;
+  jobTypeNameTooLong?: JobTypeNameTooLong | undefined;
   /** idempotency_key exceeds max_idempotency_key_bytes. */
-  idempotencyKeyTooLong?:
-    | IdempotencyKeyTooLong
-    | undefined;
+  idempotencyKeyTooLong?: IdempotencyKeyTooLong | undefined;
   /** scheduled_at is further out than max_schedule_horizon. */
-  scheduledTooFar?:
-    | ScheduledTooFar
-    | undefined;
+  scheduledTooFar?: ScheduledTooFar | undefined;
   /** Structural validation failed (e.g. required field missing). */
-  invalidRequest?:
-    | InvalidRequest
-    | undefined;
+  invalidRequest?: InvalidRequest | undefined;
   /**
    * The target queue is at capacity (max_queue_depth). Non-deterministic:
    * it clears once the queue drains.
    */
-  queueFull?:
-    | QueueFull
-    | undefined;
+  queueFull?: QueueFull | undefined;
   /**
    * The target queue is being deleted (an operator delete is draining it),
    * so it is not currently accepting new jobs. Non-deterministic: it clears
@@ -299,9 +263,7 @@ export interface ScheduledTooFar {
    * The server's configured maximum schedule horizon (how far ahead
    * scheduled_at may be set, measured from the time of the request).
    */
-  horizon?:
-    | Duration
-    | undefined;
+  horizon?: Duration | undefined;
   /**
    * The absolute scheduled_at the producer requested, which exceeded
    * now + horizon.
@@ -330,9 +292,7 @@ export interface EnqueueRequest {
   /** Type tag for worker-side dispatch. */
   jobType: string;
   /** Opaque payload with encoding hint for the worker. */
-  payload?:
-    | Payload
-    | undefined;
+  payload?: Payload | undefined;
   /**
    * Deduplication key, scoped to the target queue. A repeat enqueue with the
    * same key inside the queue's dedup window is not enqueued again: it returns
@@ -341,27 +301,19 @@ export interface EnqueueRequest {
    * of job state, so a repeat within the window dedups even if the original
    * job already completed or was dead-lettered.
    */
-  idempotencyKey?:
-    | string
-    | undefined;
+  idempotencyKey?: string | undefined;
   /**
    * Priority override. If unset, the queue default is used.
    * Range: 0–9. Higher priorities dequeue first.
    */
-  priority?:
-    | number
-    | undefined;
+  priority?: number | undefined;
   /**
    * Max attempts override. If unset, the queue default is used.
    * Must be at least 1.
    */
-  maxAttempts?:
-    | number
-    | undefined;
+  maxAttempts?: number | undefined;
   /** Trace context from the producer. */
-  traceContext?:
-    | TraceContext
-    | undefined;
+  traceContext?: TraceContext | undefined;
   /** Custom key-value pairs. Keys must be non-empty. */
   custom: { [key: string]: PrimitiveValue };
   /**
@@ -401,9 +353,7 @@ export interface EnqueueBatchResponse {
 /** Outcome of a single job in the batch. Exactly one outcome is set. */
 export interface JobResult {
   /** The job was enqueued. */
-  success?:
-    | EnqueueResponse
-    | undefined;
+  success?: EnqueueResponse | undefined;
   /** The job was rejected. See JobRejection for the catalogue of reasons. */
   rejection?: JobRejection | undefined;
 }
@@ -411,9 +361,7 @@ export interface JobResult {
 /** Response for EnqueueAtomic. Exactly one outcome is set. */
 export interface EnqueueAtomicResponse {
   /** All jobs passed pre-flight checks and were enqueued atomically. */
-  success?:
-    | EnqueueAtomicSuccess
-    | undefined;
+  success?: EnqueueAtomicSuccess | undefined;
   /** At least one job failed a pre-flight check; nothing was enqueued. */
   rejection?: BatchValidationFailure | undefined;
 }
@@ -451,25 +399,19 @@ export interface ReserveRequest {
    * The server clamps this to its configured max (max_wait_timeout,
    * advertised in GetServerInfo); a larger value is not an error.
    */
-  waitTimeout?:
-    | Duration
-    | undefined;
+  waitTimeout?: Duration | undefined;
   /**
    * Lease duration the worker wants. Must be positive. Server may clamp to its
    * configured max (max_lease_duration, advertised in GetServerInfo). The
    * worker must ack, nack, or extend before this elapses, or the job will be
    * redelivered.
    */
-  leaseDuration?:
-    | Duration
-    | undefined;
+  leaseDuration?: Duration | undefined;
   /**
    * A stable worker identifier, useful for observability and
    * sticky-routing future features.
    */
-  workerId?:
-    | string
-    | undefined;
+  workerId?: string | undefined;
   /**
    * Maximum number of jobs to return in one response. Defaults to 1 if unset.
    * The server clamps this to its configured max (max_reserve_batch, advertised
@@ -503,13 +445,9 @@ export interface NackRequest {
   /** The attempt for which this nack applies. Used to prevent nacking a job that has been redelivered. */
   attempt: number;
   /** Human-readable reason, captured for debugging and metrics. */
-  reason?:
-    | string
-    | undefined;
+  reason?: string | undefined;
   /** Explicit retry behavior. */
-  retry?:
-    | NackRetry
-    | undefined;
+  retry?: NackRetry | undefined;
   /** Worker identifier for observability. */
   workerId?: string | undefined;
 }
@@ -517,13 +455,9 @@ export interface NackRequest {
 /** Exactly one strategy must be set. */
 export interface NackRetry {
   /** Use the queue's default retry policy. */
-  default?:
-    | Empty
-    | undefined;
+  default?: Empty | undefined;
   /** Retry after this delay. */
-  delay?:
-    | Duration
-    | undefined;
+  delay?: Duration | undefined;
   /** Don't retry; move directly to dead-letter. */
   deadLetter?: Empty | undefined;
 }
@@ -543,9 +477,7 @@ export interface ExtendRequest {
    * The server clamps this to its configured max (max_lease_duration,
    * advertised in GetServerInfo); a larger value is not an error.
    */
-  leaseDuration?:
-    | Duration
-    | undefined;
+  leaseDuration?: Duration | undefined;
   /** Worker identifier for observability. */
   workerId?: string | undefined;
 }
@@ -569,15 +501,11 @@ export interface DeadLetterRecord {
    * lease_expires_at may be unset or stale, so do not validate it as a live Job — to
    * replay, copy its fields into an EnqueueRequest.
    */
-  job?:
-    | Job
-    | undefined;
+  job?: Job | undefined;
   /** Why the job was dead-lettered. */
   cause: DeadLetterCause;
   /** Wall-clock time the job was dead-lettered. Always set. */
-  failedAt?:
-    | Date
-    | undefined;
+  failedAt?: Date | undefined;
   /** The attempt number the job died on (1-based). */
   finalAttempt: number;
   /**
@@ -593,9 +521,7 @@ export interface DrainDeadLettersRequest {
    * Restrict the drain to a single queue. If unset, drains across all queues,
    * oldest-first.
    */
-  queue?:
-    | string
-    | undefined;
+  queue?: string | undefined;
   /**
    * Maximum number of records to return in one response. Defaults to 1 if unset.
    * The server clamps this to its configured max (max_reserve_batch, advertised
@@ -612,8 +538,7 @@ export interface DrainDeadLettersResponse {
   records: DeadLetterRecord[];
 }
 
-export interface GetServerInfoRequest {
-}
+export type GetServerInfoRequest = {};
 
 export interface GetServerInfoResponse {
   /** Server version (semver string). */
@@ -621,9 +546,7 @@ export interface GetServerInfoResponse {
   /** Protocol versions supported by this server. */
   supportedProtocolVersions: string[];
   /** Server-side time. Useful for clients to detect clock skew. */
-  serverTime?:
-    | Date
-    | undefined;
+  serverTime?: Date | undefined;
   /**
    * If true, the server will reject all encodings not explicitly listed in allowed_encodings.
    * If false, the server accepts all encodings, regardless of allowed_encodings.
@@ -641,9 +564,7 @@ export interface GetServerInfoResponse {
   /** Max bytes in an idempotency_key (-> IdempotencyKeyTooLong). */
   maxIdempotencyKeyBytes: number;
   /** How far ahead scheduled_at may be set (-> ScheduledTooFar). */
-  maxScheduleHorizon?:
-    | Duration
-    | undefined;
+  maxScheduleHorizon?: Duration | undefined;
   /**
    * Max jobs accepted in a single EnqueueBatch/EnqueueAtomic request. Batches
    * larger than this fail the whole request with INVALID_ARGUMENT.
@@ -654,13 +575,9 @@ export interface GetServerInfoResponse {
   /** Max queues a single Reserve may list (exceeding this is INVALID_ARGUMENT). */
   maxReserveQueues: number;
   /** Max long-poll wait (clamps ReserveRequest.wait_timeout). */
-  maxWaitTimeout?:
-    | Duration
-    | undefined;
+  maxWaitTimeout?: Duration | undefined;
   /** Max lease duration (clamps ReserveRequest.lease_duration). */
-  maxLeaseDuration?:
-    | Duration
-    | undefined;
+  maxLeaseDuration?: Duration | undefined;
   /**
    * If true, the server is in strict mode: enqueueing to an undeclared queue is
    * rejected with UnknownQueue. If false, queues are created on demand.
@@ -675,7 +592,12 @@ export interface GetServerInfoResponse {
 }
 
 function createBasePrimitiveValue(): PrimitiveValue {
-  return { stringValue: undefined, doubleValue: undefined, intValue: undefined, boolValue: undefined };
+  return {
+    stringValue: undefined,
+    doubleValue: undefined,
+    intValue: undefined,
+    boolValue: undefined,
+  };
 }
 
 export const PrimitiveValue: MessageFns<PrimitiveValue> = {
@@ -688,7 +610,9 @@ export const PrimitiveValue: MessageFns<PrimitiveValue> = {
     }
     if (message.intValue !== undefined) {
       if (BigInt.asIntN(64, message.intValue) !== message.intValue) {
-        throw new globalThis.Error("value provided for field message.intValue of type int64 too large");
+        throw new globalThis.Error(
+          "value provided for field message.intValue of type int64 too large",
+        );
       }
       writer.uint32(24).int64(message.intValue);
     }
@@ -751,23 +675,23 @@ export const PrimitiveValue: MessageFns<PrimitiveValue> = {
       stringValue: isSet(object.stringValue)
         ? globalThis.String(object.stringValue)
         : isSet(object.string_value)
-        ? globalThis.String(object.string_value)
-        : undefined,
+          ? globalThis.String(object.string_value)
+          : undefined,
       doubleValue: isSet(object.doubleValue)
         ? globalThis.Number(object.doubleValue)
         : isSet(object.double_value)
-        ? globalThis.Number(object.double_value)
-        : undefined,
+          ? globalThis.Number(object.double_value)
+          : undefined,
       intValue: isSet(object.intValue)
         ? BigInt(object.intValue)
         : isSet(object.int_value)
-        ? BigInt(object.int_value)
-        : undefined,
+          ? BigInt(object.int_value)
+          : undefined,
       boolValue: isSet(object.boolValue)
         ? globalThis.Boolean(object.boolValue)
         : isSet(object.bool_value)
-        ? globalThis.Boolean(object.bool_value)
-        : undefined,
+          ? globalThis.Boolean(object.bool_value)
+          : undefined,
     };
   },
 
@@ -1132,45 +1056,45 @@ export const Job: MessageFns<Job> = {
       jobType: isSet(object.jobType)
         ? globalThis.String(object.jobType)
         : isSet(object.job_type)
-        ? globalThis.String(object.job_type)
-        : "",
+          ? globalThis.String(object.job_type)
+          : "",
       payload: isSet(object.payload) ? Payload.fromJSON(object.payload) : undefined,
       priority: isSet(object.priority) ? globalThis.Number(object.priority) : 0,
       traceContext: isSet(object.traceContext)
         ? TraceContext.fromJSON(object.traceContext)
         : isSet(object.trace_context)
-        ? TraceContext.fromJSON(object.trace_context)
-        : undefined,
+          ? TraceContext.fromJSON(object.trace_context)
+          : undefined,
       enqueuedAt: isSet(object.enqueuedAt)
         ? fromJsonTimestamp(object.enqueuedAt)
         : isSet(object.enqueued_at)
-        ? fromJsonTimestamp(object.enqueued_at)
-        : undefined,
+          ? fromJsonTimestamp(object.enqueued_at)
+          : undefined,
       attempt: isSet(object.attempt) ? globalThis.Number(object.attempt) : 0,
       maxAttempts: isSet(object.maxAttempts)
         ? globalThis.Number(object.maxAttempts)
         : isSet(object.max_attempts)
-        ? globalThis.Number(object.max_attempts)
-        : 0,
+          ? globalThis.Number(object.max_attempts)
+          : 0,
       leaseExpiresAt: isSet(object.leaseExpiresAt)
         ? fromJsonTimestamp(object.leaseExpiresAt)
         : isSet(object.lease_expires_at)
-        ? fromJsonTimestamp(object.lease_expires_at)
-        : undefined,
+          ? fromJsonTimestamp(object.lease_expires_at)
+          : undefined,
       custom: isObject(object.custom)
         ? (globalThis.Object.entries(object.custom) as [string, any][]).reduce(
-          (acc: { [key: string]: PrimitiveValue }, [key, value]: [string, any]) => {
-            acc[key] = PrimitiveValue.fromJSON(value);
-            return acc;
-          },
-          {},
-        )
+            (acc: { [key: string]: PrimitiveValue }, [key, value]: [string, any]) => {
+              acc[key] = PrimitiveValue.fromJSON(value);
+              return acc;
+            },
+            {},
+          )
         : {},
       scheduledAt: isSet(object.scheduledAt)
         ? fromJsonTimestamp(object.scheduledAt)
         : isSet(object.scheduled_at)
-        ? fromJsonTimestamp(object.scheduled_at)
-        : undefined,
+          ? fromJsonTimestamp(object.scheduled_at)
+          : undefined,
       queue: isSet(object.queue) ? globalThis.String(object.queue) : "",
     };
   },
@@ -1229,26 +1153,27 @@ export const Job: MessageFns<Job> = {
     const message = createBaseJob();
     message.id = object.id ?? "";
     message.jobType = object.jobType ?? "";
-    message.payload = (object.payload !== undefined && object.payload !== null)
-      ? Payload.fromPartial(object.payload)
-      : undefined;
+    message.payload =
+      object.payload !== undefined && object.payload !== null
+        ? Payload.fromPartial(object.payload)
+        : undefined;
     message.priority = object.priority ?? 0;
-    message.traceContext = (object.traceContext !== undefined && object.traceContext !== null)
-      ? TraceContext.fromPartial(object.traceContext)
-      : undefined;
+    message.traceContext =
+      object.traceContext !== undefined && object.traceContext !== null
+        ? TraceContext.fromPartial(object.traceContext)
+        : undefined;
     message.enqueuedAt = object.enqueuedAt ?? undefined;
     message.attempt = object.attempt ?? 0;
     message.maxAttempts = object.maxAttempts ?? 0;
     message.leaseExpiresAt = object.leaseExpiresAt ?? undefined;
-    message.custom = (globalThis.Object.entries(object.custom ?? {}) as [string, PrimitiveValue][]).reduce(
-      (acc: { [key: string]: PrimitiveValue }, [key, value]: [string, PrimitiveValue]) => {
-        if (value !== undefined) {
-          acc[key] = PrimitiveValue.fromPartial(value);
-        }
-        return acc;
-      },
-      {},
-    );
+    message.custom = (
+      globalThis.Object.entries(object.custom ?? {}) as [string, PrimitiveValue][]
+    ).reduce((acc: { [key: string]: PrimitiveValue }, [key, value]: [string, PrimitiveValue]) => {
+      if (value !== undefined) {
+        acc[key] = PrimitiveValue.fromPartial(value);
+      }
+      return acc;
+    }, {});
     message.scheduledAt = object.scheduledAt ?? undefined;
     message.queue = object.queue ?? "";
     return message;
@@ -1326,9 +1251,10 @@ export const Job_CustomEntry: MessageFns<Job_CustomEntry> = {
   fromPartial<I extends Exact<DeepPartial<Job_CustomEntry>, I>>(object: I): Job_CustomEntry {
     const message = createBaseJob_CustomEntry();
     message.key = object.key ?? "";
-    message.value = (object.value !== undefined && object.value !== null)
-      ? PrimitiveValue.fromPartial(object.value)
-      : undefined;
+    message.value =
+      object.value !== undefined && object.value !== null
+        ? PrimitiveValue.fromPartial(object.value)
+        : undefined;
     return message;
   },
 };
@@ -1532,73 +1458,73 @@ export const JobRejection: MessageFns<JobRejection> = {
       unknownQueue: isSet(object.unknownQueue)
         ? UnknownQueue.fromJSON(object.unknownQueue)
         : isSet(object.unknown_queue)
-        ? UnknownQueue.fromJSON(object.unknown_queue)
-        : undefined,
+          ? UnknownQueue.fromJSON(object.unknown_queue)
+          : undefined,
       payloadTooLarge: isSet(object.payloadTooLarge)
         ? PayloadTooLarge.fromJSON(object.payloadTooLarge)
         : isSet(object.payload_too_large)
-        ? PayloadTooLarge.fromJSON(object.payload_too_large)
-        : undefined,
+          ? PayloadTooLarge.fromJSON(object.payload_too_large)
+          : undefined,
       encodingNotAllowed: isSet(object.encodingNotAllowed)
         ? EncodingNotAllowed.fromJSON(object.encodingNotAllowed)
         : isSet(object.encoding_not_allowed)
-        ? EncodingNotAllowed.fromJSON(object.encoding_not_allowed)
-        : undefined,
+          ? EncodingNotAllowed.fromJSON(object.encoding_not_allowed)
+          : undefined,
       jobTypeNotAllowed: isSet(object.jobTypeNotAllowed)
         ? JobTypeNotAllowed.fromJSON(object.jobTypeNotAllowed)
         : isSet(object.job_type_not_allowed)
-        ? JobTypeNotAllowed.fromJSON(object.job_type_not_allowed)
-        : undefined,
+          ? JobTypeNotAllowed.fromJSON(object.job_type_not_allowed)
+          : undefined,
       customEntriesTooMany: isSet(object.customEntriesTooMany)
         ? CustomEntriesTooMany.fromJSON(object.customEntriesTooMany)
         : isSet(object.custom_entries_too_many)
-        ? CustomEntriesTooMany.fromJSON(object.custom_entries_too_many)
-        : undefined,
+          ? CustomEntriesTooMany.fromJSON(object.custom_entries_too_many)
+          : undefined,
       customMapTooLarge: isSet(object.customMapTooLarge)
         ? CustomMapTooLarge.fromJSON(object.customMapTooLarge)
         : isSet(object.custom_map_too_large)
-        ? CustomMapTooLarge.fromJSON(object.custom_map_too_large)
-        : undefined,
+          ? CustomMapTooLarge.fromJSON(object.custom_map_too_large)
+          : undefined,
       customKeyTooLong: isSet(object.customKeyTooLong)
         ? CustomKeyTooLong.fromJSON(object.customKeyTooLong)
         : isSet(object.custom_key_too_long)
-        ? CustomKeyTooLong.fromJSON(object.custom_key_too_long)
-        : undefined,
+          ? CustomKeyTooLong.fromJSON(object.custom_key_too_long)
+          : undefined,
       queueNameTooLong: isSet(object.queueNameTooLong)
         ? QueueNameTooLong.fromJSON(object.queueNameTooLong)
         : isSet(object.queue_name_too_long)
-        ? QueueNameTooLong.fromJSON(object.queue_name_too_long)
-        : undefined,
+          ? QueueNameTooLong.fromJSON(object.queue_name_too_long)
+          : undefined,
       jobTypeNameTooLong: isSet(object.jobTypeNameTooLong)
         ? JobTypeNameTooLong.fromJSON(object.jobTypeNameTooLong)
         : isSet(object.job_type_name_too_long)
-        ? JobTypeNameTooLong.fromJSON(object.job_type_name_too_long)
-        : undefined,
+          ? JobTypeNameTooLong.fromJSON(object.job_type_name_too_long)
+          : undefined,
       idempotencyKeyTooLong: isSet(object.idempotencyKeyTooLong)
         ? IdempotencyKeyTooLong.fromJSON(object.idempotencyKeyTooLong)
         : isSet(object.idempotency_key_too_long)
-        ? IdempotencyKeyTooLong.fromJSON(object.idempotency_key_too_long)
-        : undefined,
+          ? IdempotencyKeyTooLong.fromJSON(object.idempotency_key_too_long)
+          : undefined,
       scheduledTooFar: isSet(object.scheduledTooFar)
         ? ScheduledTooFar.fromJSON(object.scheduledTooFar)
         : isSet(object.scheduled_too_far)
-        ? ScheduledTooFar.fromJSON(object.scheduled_too_far)
-        : undefined,
+          ? ScheduledTooFar.fromJSON(object.scheduled_too_far)
+          : undefined,
       invalidRequest: isSet(object.invalidRequest)
         ? InvalidRequest.fromJSON(object.invalidRequest)
         : isSet(object.invalid_request)
-        ? InvalidRequest.fromJSON(object.invalid_request)
-        : undefined,
+          ? InvalidRequest.fromJSON(object.invalid_request)
+          : undefined,
       queueFull: isSet(object.queueFull)
         ? QueueFull.fromJSON(object.queueFull)
         : isSet(object.queue_full)
-        ? QueueFull.fromJSON(object.queue_full)
-        : undefined,
+          ? QueueFull.fromJSON(object.queue_full)
+          : undefined,
       queueClosing: isSet(object.queueClosing)
         ? QueueClosing.fromJSON(object.queueClosing)
         : isSet(object.queue_closing)
-        ? QueueClosing.fromJSON(object.queue_closing)
-        : undefined,
+          ? QueueClosing.fromJSON(object.queue_closing)
+          : undefined,
     };
   },
 
@@ -1654,49 +1580,62 @@ export const JobRejection: MessageFns<JobRejection> = {
   },
   fromPartial<I extends Exact<DeepPartial<JobRejection>, I>>(object: I): JobRejection {
     const message = createBaseJobRejection();
-    message.unknownQueue = (object.unknownQueue !== undefined && object.unknownQueue !== null)
-      ? UnknownQueue.fromPartial(object.unknownQueue)
-      : undefined;
-    message.payloadTooLarge = (object.payloadTooLarge !== undefined && object.payloadTooLarge !== null)
-      ? PayloadTooLarge.fromPartial(object.payloadTooLarge)
-      : undefined;
-    message.encodingNotAllowed = (object.encodingNotAllowed !== undefined && object.encodingNotAllowed !== null)
-      ? EncodingNotAllowed.fromPartial(object.encodingNotAllowed)
-      : undefined;
-    message.jobTypeNotAllowed = (object.jobTypeNotAllowed !== undefined && object.jobTypeNotAllowed !== null)
-      ? JobTypeNotAllowed.fromPartial(object.jobTypeNotAllowed)
-      : undefined;
-    message.customEntriesTooMany = (object.customEntriesTooMany !== undefined && object.customEntriesTooMany !== null)
-      ? CustomEntriesTooMany.fromPartial(object.customEntriesTooMany)
-      : undefined;
-    message.customMapTooLarge = (object.customMapTooLarge !== undefined && object.customMapTooLarge !== null)
-      ? CustomMapTooLarge.fromPartial(object.customMapTooLarge)
-      : undefined;
-    message.customKeyTooLong = (object.customKeyTooLong !== undefined && object.customKeyTooLong !== null)
-      ? CustomKeyTooLong.fromPartial(object.customKeyTooLong)
-      : undefined;
-    message.queueNameTooLong = (object.queueNameTooLong !== undefined && object.queueNameTooLong !== null)
-      ? QueueNameTooLong.fromPartial(object.queueNameTooLong)
-      : undefined;
-    message.jobTypeNameTooLong = (object.jobTypeNameTooLong !== undefined && object.jobTypeNameTooLong !== null)
-      ? JobTypeNameTooLong.fromPartial(object.jobTypeNameTooLong)
-      : undefined;
+    message.unknownQueue =
+      object.unknownQueue !== undefined && object.unknownQueue !== null
+        ? UnknownQueue.fromPartial(object.unknownQueue)
+        : undefined;
+    message.payloadTooLarge =
+      object.payloadTooLarge !== undefined && object.payloadTooLarge !== null
+        ? PayloadTooLarge.fromPartial(object.payloadTooLarge)
+        : undefined;
+    message.encodingNotAllowed =
+      object.encodingNotAllowed !== undefined && object.encodingNotAllowed !== null
+        ? EncodingNotAllowed.fromPartial(object.encodingNotAllowed)
+        : undefined;
+    message.jobTypeNotAllowed =
+      object.jobTypeNotAllowed !== undefined && object.jobTypeNotAllowed !== null
+        ? JobTypeNotAllowed.fromPartial(object.jobTypeNotAllowed)
+        : undefined;
+    message.customEntriesTooMany =
+      object.customEntriesTooMany !== undefined && object.customEntriesTooMany !== null
+        ? CustomEntriesTooMany.fromPartial(object.customEntriesTooMany)
+        : undefined;
+    message.customMapTooLarge =
+      object.customMapTooLarge !== undefined && object.customMapTooLarge !== null
+        ? CustomMapTooLarge.fromPartial(object.customMapTooLarge)
+        : undefined;
+    message.customKeyTooLong =
+      object.customKeyTooLong !== undefined && object.customKeyTooLong !== null
+        ? CustomKeyTooLong.fromPartial(object.customKeyTooLong)
+        : undefined;
+    message.queueNameTooLong =
+      object.queueNameTooLong !== undefined && object.queueNameTooLong !== null
+        ? QueueNameTooLong.fromPartial(object.queueNameTooLong)
+        : undefined;
+    message.jobTypeNameTooLong =
+      object.jobTypeNameTooLong !== undefined && object.jobTypeNameTooLong !== null
+        ? JobTypeNameTooLong.fromPartial(object.jobTypeNameTooLong)
+        : undefined;
     message.idempotencyKeyTooLong =
-      (object.idempotencyKeyTooLong !== undefined && object.idempotencyKeyTooLong !== null)
+      object.idempotencyKeyTooLong !== undefined && object.idempotencyKeyTooLong !== null
         ? IdempotencyKeyTooLong.fromPartial(object.idempotencyKeyTooLong)
         : undefined;
-    message.scheduledTooFar = (object.scheduledTooFar !== undefined && object.scheduledTooFar !== null)
-      ? ScheduledTooFar.fromPartial(object.scheduledTooFar)
-      : undefined;
-    message.invalidRequest = (object.invalidRequest !== undefined && object.invalidRequest !== null)
-      ? InvalidRequest.fromPartial(object.invalidRequest)
-      : undefined;
-    message.queueFull = (object.queueFull !== undefined && object.queueFull !== null)
-      ? QueueFull.fromPartial(object.queueFull)
-      : undefined;
-    message.queueClosing = (object.queueClosing !== undefined && object.queueClosing !== null)
-      ? QueueClosing.fromPartial(object.queueClosing)
-      : undefined;
+    message.scheduledTooFar =
+      object.scheduledTooFar !== undefined && object.scheduledTooFar !== null
+        ? ScheduledTooFar.fromPartial(object.scheduledTooFar)
+        : undefined;
+    message.invalidRequest =
+      object.invalidRequest !== undefined && object.invalidRequest !== null
+        ? InvalidRequest.fromPartial(object.invalidRequest)
+        : undefined;
+    message.queueFull =
+      object.queueFull !== undefined && object.queueFull !== null
+        ? QueueFull.fromPartial(object.queueFull)
+        : undefined;
+    message.queueClosing =
+      object.queueClosing !== undefined && object.queueClosing !== null
+        ? QueueClosing.fromPartial(object.queueClosing)
+        : undefined;
     return message;
   },
 };
@@ -1767,13 +1706,17 @@ export const PayloadTooLarge: MessageFns<PayloadTooLarge> = {
   encode(message: PayloadTooLarge, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.limit !== 0n) {
       if (BigInt.asUintN(64, message.limit) !== message.limit) {
-        throw new globalThis.Error("value provided for field message.limit of type uint64 too large");
+        throw new globalThis.Error(
+          "value provided for field message.limit of type uint64 too large",
+        );
       }
       writer.uint32(8).uint64(message.limit);
     }
     if (message.actual !== 0n) {
       if (BigInt.asUintN(64, message.actual) !== message.actual) {
-        throw new globalThis.Error("value provided for field message.actual of type uint64 too large");
+        throw new globalThis.Error(
+          "value provided for field message.actual of type uint64 too large",
+        );
       }
       writer.uint32(16).uint64(message.actual);
     }
@@ -1891,7 +1834,9 @@ export const EncodingNotAllowed: MessageFns<EncodingNotAllowed> = {
   fromJSON(object: any): EncodingNotAllowed {
     return {
       encoding: isSet(object.encoding) ? globalThis.String(object.encoding) : "",
-      allowed: globalThis.Array.isArray(object?.allowed) ? object.allowed.map((e: any) => globalThis.String(e)) : [],
+      allowed: globalThis.Array.isArray(object?.allowed)
+        ? object.allowed.map((e: any) => globalThis.String(e))
+        : [],
     };
   },
 
@@ -1969,9 +1914,11 @@ export const JobTypeNotAllowed: MessageFns<JobTypeNotAllowed> = {
       jobType: isSet(object.jobType)
         ? globalThis.String(object.jobType)
         : isSet(object.job_type)
-        ? globalThis.String(object.job_type)
-        : "",
-      allowed: globalThis.Array.isArray(object?.allowed) ? object.allowed.map((e: any) => globalThis.String(e)) : [],
+          ? globalThis.String(object.job_type)
+          : "",
+      allowed: globalThis.Array.isArray(object?.allowed)
+        ? object.allowed.map((e: any) => globalThis.String(e))
+        : [],
     };
   },
 
@@ -2065,7 +2012,9 @@ export const CustomEntriesTooMany: MessageFns<CustomEntriesTooMany> = {
   create<I extends Exact<DeepPartial<CustomEntriesTooMany>, I>>(base?: I): CustomEntriesTooMany {
     return CustomEntriesTooMany.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<CustomEntriesTooMany>, I>>(object: I): CustomEntriesTooMany {
+  fromPartial<I extends Exact<DeepPartial<CustomEntriesTooMany>, I>>(
+    object: I,
+  ): CustomEntriesTooMany {
     const message = createBaseCustomEntriesTooMany();
     message.limit = object.limit ?? 0;
     message.actual = object.actual ?? 0;
@@ -2081,13 +2030,17 @@ export const CustomMapTooLarge: MessageFns<CustomMapTooLarge> = {
   encode(message: CustomMapTooLarge, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.limit !== 0n) {
       if (BigInt.asUintN(64, message.limit) !== message.limit) {
-        throw new globalThis.Error("value provided for field message.limit of type uint64 too large");
+        throw new globalThis.Error(
+          "value provided for field message.limit of type uint64 too large",
+        );
       }
       writer.uint32(8).uint64(message.limit);
     }
     if (message.actual !== 0n) {
       if (BigInt.asUintN(64, message.actual) !== message.actual) {
-        throw new globalThis.Error("value provided for field message.actual of type uint64 too large");
+        throw new globalThis.Error(
+          "value provided for field message.actual of type uint64 too large",
+        );
       }
       writer.uint32(16).uint64(message.actual);
     }
@@ -2169,7 +2122,9 @@ export const CustomKeyTooLong: MessageFns<CustomKeyTooLong> = {
     }
     if (message.actual !== 0n) {
       if (BigInt.asUintN(64, message.actual) !== message.actual) {
-        throw new globalThis.Error("value provided for field message.actual of type uint64 too large");
+        throw new globalThis.Error(
+          "value provided for field message.actual of type uint64 too large",
+        );
       }
       writer.uint32(24).uint64(message.actual);
     }
@@ -2261,7 +2216,9 @@ export const QueueNameTooLong: MessageFns<QueueNameTooLong> = {
     }
     if (message.actual !== 0n) {
       if (BigInt.asUintN(64, message.actual) !== message.actual) {
-        throw new globalThis.Error("value provided for field message.actual of type uint64 too large");
+        throw new globalThis.Error(
+          "value provided for field message.actual of type uint64 too large",
+        );
       }
       writer.uint32(16).uint64(message.actual);
     }
@@ -2340,7 +2297,9 @@ export const JobTypeNameTooLong: MessageFns<JobTypeNameTooLong> = {
     }
     if (message.actual !== 0n) {
       if (BigInt.asUintN(64, message.actual) !== message.actual) {
-        throw new globalThis.Error("value provided for field message.actual of type uint64 too large");
+        throw new globalThis.Error(
+          "value provided for field message.actual of type uint64 too large",
+        );
       }
       writer.uint32(16).uint64(message.actual);
     }
@@ -2419,7 +2378,9 @@ export const IdempotencyKeyTooLong: MessageFns<IdempotencyKeyTooLong> = {
     }
     if (message.actual !== 0n) {
       if (BigInt.asUintN(64, message.actual) !== message.actual) {
-        throw new globalThis.Error("value provided for field message.actual of type uint64 too large");
+        throw new globalThis.Error(
+          "value provided for field message.actual of type uint64 too large",
+        );
       }
       writer.uint32(16).uint64(message.actual);
     }
@@ -2479,7 +2440,9 @@ export const IdempotencyKeyTooLong: MessageFns<IdempotencyKeyTooLong> = {
   create<I extends Exact<DeepPartial<IdempotencyKeyTooLong>, I>>(base?: I): IdempotencyKeyTooLong {
     return IdempotencyKeyTooLong.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<IdempotencyKeyTooLong>, I>>(object: I): IdempotencyKeyTooLong {
+  fromPartial<I extends Exact<DeepPartial<IdempotencyKeyTooLong>, I>>(
+    object: I,
+  ): IdempotencyKeyTooLong {
     const message = createBaseIdempotencyKeyTooLong();
     message.limit = object.limit ?? 0;
     message.actual = object.actual ?? 0n;
@@ -2557,9 +2520,10 @@ export const ScheduledTooFar: MessageFns<ScheduledTooFar> = {
   },
   fromPartial<I extends Exact<DeepPartial<ScheduledTooFar>, I>>(object: I): ScheduledTooFar {
     const message = createBaseScheduledTooFar();
-    message.horizon = (object.horizon !== undefined && object.horizon !== null)
-      ? Duration.fromPartial(object.horizon)
-      : undefined;
+    message.horizon =
+      object.horizon !== undefined && object.horizon !== null
+        ? Duration.fromPartial(object.horizon)
+        : undefined;
     message.actual = object.actual ?? undefined;
     return message;
   },
@@ -2634,7 +2598,9 @@ export const QueueFull: MessageFns<QueueFull> = {
     }
     if (message.limit !== 0n) {
       if (BigInt.asUintN(64, message.limit) !== message.limit) {
-        throw new globalThis.Error("value provided for field message.limit of type uint64 too large");
+        throw new globalThis.Error(
+          "value provided for field message.limit of type uint64 too large",
+        );
       }
       writer.uint32(16).uint64(message.limit);
     }
@@ -2798,7 +2764,10 @@ export const EnqueueRequest: MessageFns<EnqueueRequest> = {
       TraceContext.encode(message.traceContext, writer.uint32(58).fork()).join();
     }
     globalThis.Object.entries(message.custom).forEach(([key, value]: [string, PrimitiveValue]) => {
-      EnqueueRequest_CustomEntry.encode({ key: key as any, value }, writer.uint32(66).fork()).join();
+      EnqueueRequest_CustomEntry.encode(
+        { key: key as any, value },
+        writer.uint32(66).fork(),
+      ).join();
     });
     if (message.scheduledAt !== undefined) {
       Timestamp.encode(toTimestamp(message.scheduledAt), writer.uint32(74).fork()).join();
@@ -2903,39 +2872,39 @@ export const EnqueueRequest: MessageFns<EnqueueRequest> = {
       jobType: isSet(object.jobType)
         ? globalThis.String(object.jobType)
         : isSet(object.job_type)
-        ? globalThis.String(object.job_type)
-        : "",
+          ? globalThis.String(object.job_type)
+          : "",
       payload: isSet(object.payload) ? Payload.fromJSON(object.payload) : undefined,
       idempotencyKey: isSet(object.idempotencyKey)
         ? globalThis.String(object.idempotencyKey)
         : isSet(object.idempotency_key)
-        ? globalThis.String(object.idempotency_key)
-        : undefined,
+          ? globalThis.String(object.idempotency_key)
+          : undefined,
       priority: isSet(object.priority) ? globalThis.Number(object.priority) : undefined,
       maxAttempts: isSet(object.maxAttempts)
         ? globalThis.Number(object.maxAttempts)
         : isSet(object.max_attempts)
-        ? globalThis.Number(object.max_attempts)
-        : undefined,
+          ? globalThis.Number(object.max_attempts)
+          : undefined,
       traceContext: isSet(object.traceContext)
         ? TraceContext.fromJSON(object.traceContext)
         : isSet(object.trace_context)
-        ? TraceContext.fromJSON(object.trace_context)
-        : undefined,
+          ? TraceContext.fromJSON(object.trace_context)
+          : undefined,
       custom: isObject(object.custom)
         ? (globalThis.Object.entries(object.custom) as [string, any][]).reduce(
-          (acc: { [key: string]: PrimitiveValue }, [key, value]: [string, any]) => {
-            acc[key] = PrimitiveValue.fromJSON(value);
-            return acc;
-          },
-          {},
-        )
+            (acc: { [key: string]: PrimitiveValue }, [key, value]: [string, any]) => {
+              acc[key] = PrimitiveValue.fromJSON(value);
+              return acc;
+            },
+            {},
+          )
         : {},
       scheduledAt: isSet(object.scheduledAt)
         ? fromJsonTimestamp(object.scheduledAt)
         : isSet(object.scheduled_at)
-        ? fromJsonTimestamp(object.scheduled_at)
-        : undefined,
+          ? fromJsonTimestamp(object.scheduled_at)
+          : undefined,
     };
   },
 
@@ -2984,24 +2953,25 @@ export const EnqueueRequest: MessageFns<EnqueueRequest> = {
     const message = createBaseEnqueueRequest();
     message.queue = object.queue ?? "";
     message.jobType = object.jobType ?? "";
-    message.payload = (object.payload !== undefined && object.payload !== null)
-      ? Payload.fromPartial(object.payload)
-      : undefined;
+    message.payload =
+      object.payload !== undefined && object.payload !== null
+        ? Payload.fromPartial(object.payload)
+        : undefined;
     message.idempotencyKey = object.idempotencyKey ?? undefined;
     message.priority = object.priority ?? undefined;
     message.maxAttempts = object.maxAttempts ?? undefined;
-    message.traceContext = (object.traceContext !== undefined && object.traceContext !== null)
-      ? TraceContext.fromPartial(object.traceContext)
-      : undefined;
-    message.custom = (globalThis.Object.entries(object.custom ?? {}) as [string, PrimitiveValue][]).reduce(
-      (acc: { [key: string]: PrimitiveValue }, [key, value]: [string, PrimitiveValue]) => {
-        if (value !== undefined) {
-          acc[key] = PrimitiveValue.fromPartial(value);
-        }
-        return acc;
-      },
-      {},
-    );
+    message.traceContext =
+      object.traceContext !== undefined && object.traceContext !== null
+        ? TraceContext.fromPartial(object.traceContext)
+        : undefined;
+    message.custom = (
+      globalThis.Object.entries(object.custom ?? {}) as [string, PrimitiveValue][]
+    ).reduce((acc: { [key: string]: PrimitiveValue }, [key, value]: [string, PrimitiveValue]) => {
+      if (value !== undefined) {
+        acc[key] = PrimitiveValue.fromPartial(value);
+      }
+      return acc;
+    }, {});
     message.scheduledAt = object.scheduledAt ?? undefined;
     return message;
   },
@@ -3012,7 +2982,10 @@ function createBaseEnqueueRequest_CustomEntry(): EnqueueRequest_CustomEntry {
 }
 
 export const EnqueueRequest_CustomEntry: MessageFns<EnqueueRequest_CustomEntry> = {
-  encode(message: EnqueueRequest_CustomEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+  encode(
+    message: EnqueueRequest_CustomEntry,
+    writer: BinaryWriter = new BinaryWriter(),
+  ): BinaryWriter {
     if (message.key !== "") {
       writer.uint32(10).string(message.key);
     }
@@ -3072,15 +3045,20 @@ export const EnqueueRequest_CustomEntry: MessageFns<EnqueueRequest_CustomEntry> 
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<EnqueueRequest_CustomEntry>, I>>(base?: I): EnqueueRequest_CustomEntry {
+  create<I extends Exact<DeepPartial<EnqueueRequest_CustomEntry>, I>>(
+    base?: I,
+  ): EnqueueRequest_CustomEntry {
     return EnqueueRequest_CustomEntry.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<EnqueueRequest_CustomEntry>, I>>(object: I): EnqueueRequest_CustomEntry {
+  fromPartial<I extends Exact<DeepPartial<EnqueueRequest_CustomEntry>, I>>(
+    object: I,
+  ): EnqueueRequest_CustomEntry {
     const message = createBaseEnqueueRequest_CustomEntry();
     message.key = object.key ?? "";
-    message.value = (object.value !== undefined && object.value !== null)
-      ? PrimitiveValue.fromPartial(object.value)
-      : undefined;
+    message.value =
+      object.value !== undefined && object.value !== null
+        ? PrimitiveValue.fromPartial(object.value)
+        : undefined;
     return message;
   },
 };
@@ -3137,8 +3115,8 @@ export const EnqueueResponse: MessageFns<EnqueueResponse> = {
       jobId: isSet(object.jobId)
         ? globalThis.String(object.jobId)
         : isSet(object.job_id)
-        ? globalThis.String(object.job_id)
-        : "",
+          ? globalThis.String(object.job_id)
+          : "",
       deduplicated: isSet(object.deduplicated) ? globalThis.Boolean(object.deduplicated) : false,
     };
   },
@@ -3203,7 +3181,9 @@ export const EnqueueBatchRequest: MessageFns<EnqueueBatchRequest> = {
 
   fromJSON(object: any): EnqueueBatchRequest {
     return {
-      jobs: globalThis.Array.isArray(object?.jobs) ? object.jobs.map((e: any) => EnqueueRequest.fromJSON(e)) : [],
+      jobs: globalThis.Array.isArray(object?.jobs)
+        ? object.jobs.map((e: any) => EnqueueRequest.fromJSON(e))
+        : [],
     };
   },
 
@@ -3218,7 +3198,9 @@ export const EnqueueBatchRequest: MessageFns<EnqueueBatchRequest> = {
   create<I extends Exact<DeepPartial<EnqueueBatchRequest>, I>>(base?: I): EnqueueBatchRequest {
     return EnqueueBatchRequest.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<EnqueueBatchRequest>, I>>(object: I): EnqueueBatchRequest {
+  fromPartial<I extends Exact<DeepPartial<EnqueueBatchRequest>, I>>(
+    object: I,
+  ): EnqueueBatchRequest {
     const message = createBaseEnqueueBatchRequest();
     message.jobs = object.jobs?.map((e) => EnqueueRequest.fromPartial(e)) || [];
     return message;
@@ -3263,7 +3245,9 @@ export const EnqueueBatchResponse: MessageFns<EnqueueBatchResponse> = {
 
   fromJSON(object: any): EnqueueBatchResponse {
     return {
-      results: globalThis.Array.isArray(object?.results) ? object.results.map((e: any) => JobResult.fromJSON(e)) : [],
+      results: globalThis.Array.isArray(object?.results)
+        ? object.results.map((e: any) => JobResult.fromJSON(e))
+        : [],
     };
   },
 
@@ -3278,7 +3262,9 @@ export const EnqueueBatchResponse: MessageFns<EnqueueBatchResponse> = {
   create<I extends Exact<DeepPartial<EnqueueBatchResponse>, I>>(base?: I): EnqueueBatchResponse {
     return EnqueueBatchResponse.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<EnqueueBatchResponse>, I>>(object: I): EnqueueBatchResponse {
+  fromPartial<I extends Exact<DeepPartial<EnqueueBatchResponse>, I>>(
+    object: I,
+  ): EnqueueBatchResponse {
     const message = createBaseEnqueueBatchResponse();
     message.results = object.results?.map((e) => JobResult.fromPartial(e)) || [];
     return message;
@@ -3355,12 +3341,14 @@ export const JobResult: MessageFns<JobResult> = {
   },
   fromPartial<I extends Exact<DeepPartial<JobResult>, I>>(object: I): JobResult {
     const message = createBaseJobResult();
-    message.success = (object.success !== undefined && object.success !== null)
-      ? EnqueueResponse.fromPartial(object.success)
-      : undefined;
-    message.rejection = (object.rejection !== undefined && object.rejection !== null)
-      ? JobRejection.fromPartial(object.rejection)
-      : undefined;
+    message.success =
+      object.success !== undefined && object.success !== null
+        ? EnqueueResponse.fromPartial(object.success)
+        : undefined;
+    message.rejection =
+      object.rejection !== undefined && object.rejection !== null
+        ? JobRejection.fromPartial(object.rejection)
+        : undefined;
     return message;
   },
 };
@@ -3415,7 +3403,9 @@ export const EnqueueAtomicResponse: MessageFns<EnqueueAtomicResponse> = {
   fromJSON(object: any): EnqueueAtomicResponse {
     return {
       success: isSet(object.success) ? EnqueueAtomicSuccess.fromJSON(object.success) : undefined,
-      rejection: isSet(object.rejection) ? BatchValidationFailure.fromJSON(object.rejection) : undefined,
+      rejection: isSet(object.rejection)
+        ? BatchValidationFailure.fromJSON(object.rejection)
+        : undefined,
     };
   },
 
@@ -3433,14 +3423,18 @@ export const EnqueueAtomicResponse: MessageFns<EnqueueAtomicResponse> = {
   create<I extends Exact<DeepPartial<EnqueueAtomicResponse>, I>>(base?: I): EnqueueAtomicResponse {
     return EnqueueAtomicResponse.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<EnqueueAtomicResponse>, I>>(object: I): EnqueueAtomicResponse {
+  fromPartial<I extends Exact<DeepPartial<EnqueueAtomicResponse>, I>>(
+    object: I,
+  ): EnqueueAtomicResponse {
     const message = createBaseEnqueueAtomicResponse();
-    message.success = (object.success !== undefined && object.success !== null)
-      ? EnqueueAtomicSuccess.fromPartial(object.success)
-      : undefined;
-    message.rejection = (object.rejection !== undefined && object.rejection !== null)
-      ? BatchValidationFailure.fromPartial(object.rejection)
-      : undefined;
+    message.success =
+      object.success !== undefined && object.success !== null
+        ? EnqueueAtomicSuccess.fromPartial(object.success)
+        : undefined;
+    message.rejection =
+      object.rejection !== undefined && object.rejection !== null
+        ? BatchValidationFailure.fromPartial(object.rejection)
+        : undefined;
     return message;
   },
 };
@@ -3500,7 +3494,9 @@ export const EnqueueAtomicSuccess: MessageFns<EnqueueAtomicSuccess> = {
   create<I extends Exact<DeepPartial<EnqueueAtomicSuccess>, I>>(base?: I): EnqueueAtomicSuccess {
     return EnqueueAtomicSuccess.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<EnqueueAtomicSuccess>, I>>(object: I): EnqueueAtomicSuccess {
+  fromPartial<I extends Exact<DeepPartial<EnqueueAtomicSuccess>, I>>(
+    object: I,
+  ): EnqueueAtomicSuccess {
     const message = createBaseEnqueueAtomicSuccess();
     message.responses = object.responses?.map((e) => EnqueueResponse.fromPartial(e)) || [];
     return message;
@@ -3559,10 +3555,14 @@ export const BatchValidationFailure: MessageFns<BatchValidationFailure> = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<BatchValidationFailure>, I>>(base?: I): BatchValidationFailure {
+  create<I extends Exact<DeepPartial<BatchValidationFailure>, I>>(
+    base?: I,
+  ): BatchValidationFailure {
     return BatchValidationFailure.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<BatchValidationFailure>, I>>(object: I): BatchValidationFailure {
+  fromPartial<I extends Exact<DeepPartial<BatchValidationFailure>, I>>(
+    object: I,
+  ): BatchValidationFailure {
     const message = createBaseBatchValidationFailure();
     message.errors = object.errors?.map((e) => JobValidationError.fromPartial(e)) || [];
     return message;
@@ -3640,15 +3640,22 @@ export const JobValidationError: MessageFns<JobValidationError> = {
   fromPartial<I extends Exact<DeepPartial<JobValidationError>, I>>(object: I): JobValidationError {
     const message = createBaseJobValidationError();
     message.index = object.index ?? 0;
-    message.rejection = (object.rejection !== undefined && object.rejection !== null)
-      ? JobRejection.fromPartial(object.rejection)
-      : undefined;
+    message.rejection =
+      object.rejection !== undefined && object.rejection !== null
+        ? JobRejection.fromPartial(object.rejection)
+        : undefined;
     return message;
   },
 };
 
 function createBaseReserveRequest(): ReserveRequest {
-  return { queues: [], waitTimeout: undefined, leaseDuration: undefined, workerId: undefined, maxJobs: undefined };
+  return {
+    queues: [],
+    waitTimeout: undefined,
+    leaseDuration: undefined,
+    workerId: undefined,
+    maxJobs: undefined,
+  };
 }
 
 export const ReserveRequest: MessageFns<ReserveRequest> = {
@@ -3729,27 +3736,29 @@ export const ReserveRequest: MessageFns<ReserveRequest> = {
 
   fromJSON(object: any): ReserveRequest {
     return {
-      queues: globalThis.Array.isArray(object?.queues) ? object.queues.map((e: any) => globalThis.String(e)) : [],
+      queues: globalThis.Array.isArray(object?.queues)
+        ? object.queues.map((e: any) => globalThis.String(e))
+        : [],
       waitTimeout: isSet(object.waitTimeout)
         ? Duration.fromJSON(object.waitTimeout)
         : isSet(object.wait_timeout)
-        ? Duration.fromJSON(object.wait_timeout)
-        : undefined,
+          ? Duration.fromJSON(object.wait_timeout)
+          : undefined,
       leaseDuration: isSet(object.leaseDuration)
         ? Duration.fromJSON(object.leaseDuration)
         : isSet(object.lease_duration)
-        ? Duration.fromJSON(object.lease_duration)
-        : undefined,
+          ? Duration.fromJSON(object.lease_duration)
+          : undefined,
       workerId: isSet(object.workerId)
         ? globalThis.String(object.workerId)
         : isSet(object.worker_id)
-        ? globalThis.String(object.worker_id)
-        : undefined,
+          ? globalThis.String(object.worker_id)
+          : undefined,
       maxJobs: isSet(object.maxJobs)
         ? globalThis.Number(object.maxJobs)
         : isSet(object.max_jobs)
-        ? globalThis.Number(object.max_jobs)
-        : undefined,
+          ? globalThis.Number(object.max_jobs)
+          : undefined,
     };
   },
 
@@ -3779,12 +3788,14 @@ export const ReserveRequest: MessageFns<ReserveRequest> = {
   fromPartial<I extends Exact<DeepPartial<ReserveRequest>, I>>(object: I): ReserveRequest {
     const message = createBaseReserveRequest();
     message.queues = object.queues?.map((e) => e) || [];
-    message.waitTimeout = (object.waitTimeout !== undefined && object.waitTimeout !== null)
-      ? Duration.fromPartial(object.waitTimeout)
-      : undefined;
-    message.leaseDuration = (object.leaseDuration !== undefined && object.leaseDuration !== null)
-      ? Duration.fromPartial(object.leaseDuration)
-      : undefined;
+    message.waitTimeout =
+      object.waitTimeout !== undefined && object.waitTimeout !== null
+        ? Duration.fromPartial(object.waitTimeout)
+        : undefined;
+    message.leaseDuration =
+      object.leaseDuration !== undefined && object.leaseDuration !== null
+        ? Duration.fromPartial(object.leaseDuration)
+        : undefined;
     message.workerId = object.workerId ?? undefined;
     message.maxJobs = object.maxJobs ?? undefined;
     return message;
@@ -3828,7 +3839,11 @@ export const ReserveResponse: MessageFns<ReserveResponse> = {
   },
 
   fromJSON(object: any): ReserveResponse {
-    return { jobs: globalThis.Array.isArray(object?.jobs) ? object.jobs.map((e: any) => Job.fromJSON(e)) : [] };
+    return {
+      jobs: globalThis.Array.isArray(object?.jobs)
+        ? object.jobs.map((e: any) => Job.fromJSON(e))
+        : [],
+    };
   },
 
   toJSON(message: ReserveResponse): unknown {
@@ -3912,14 +3927,14 @@ export const AckRequest: MessageFns<AckRequest> = {
       jobId: isSet(object.jobId)
         ? globalThis.String(object.jobId)
         : isSet(object.job_id)
-        ? globalThis.String(object.job_id)
-        : "",
+          ? globalThis.String(object.job_id)
+          : "",
       attempt: isSet(object.attempt) ? globalThis.Number(object.attempt) : 0,
       workerId: isSet(object.workerId)
         ? globalThis.String(object.workerId)
         : isSet(object.worker_id)
-        ? globalThis.String(object.worker_id)
-        : undefined,
+          ? globalThis.String(object.worker_id)
+          : undefined,
     };
   },
 
@@ -3990,8 +4005,8 @@ export const AckResponse: MessageFns<AckResponse> = {
       jobId: isSet(object.jobId)
         ? globalThis.String(object.jobId)
         : isSet(object.job_id)
-        ? globalThis.String(object.job_id)
-        : "",
+          ? globalThis.String(object.job_id)
+          : "",
     };
   },
 
@@ -4098,16 +4113,16 @@ export const NackRequest: MessageFns<NackRequest> = {
       jobId: isSet(object.jobId)
         ? globalThis.String(object.jobId)
         : isSet(object.job_id)
-        ? globalThis.String(object.job_id)
-        : "",
+          ? globalThis.String(object.job_id)
+          : "",
       attempt: isSet(object.attempt) ? globalThis.Number(object.attempt) : 0,
       reason: isSet(object.reason) ? globalThis.String(object.reason) : undefined,
       retry: isSet(object.retry) ? NackRetry.fromJSON(object.retry) : undefined,
       workerId: isSet(object.workerId)
         ? globalThis.String(object.workerId)
         : isSet(object.worker_id)
-        ? globalThis.String(object.worker_id)
-        : undefined,
+          ? globalThis.String(object.worker_id)
+          : undefined,
     };
   },
 
@@ -4139,9 +4154,10 @@ export const NackRequest: MessageFns<NackRequest> = {
     message.jobId = object.jobId ?? "";
     message.attempt = object.attempt ?? 0;
     message.reason = object.reason ?? undefined;
-    message.retry = (object.retry !== undefined && object.retry !== null)
-      ? NackRetry.fromPartial(object.retry)
-      : undefined;
+    message.retry =
+      object.retry !== undefined && object.retry !== null
+        ? NackRetry.fromPartial(object.retry)
+        : undefined;
     message.workerId = object.workerId ?? undefined;
     return message;
   },
@@ -4212,8 +4228,8 @@ export const NackRetry: MessageFns<NackRetry> = {
       deadLetter: isSet(object.deadLetter)
         ? Empty.fromJSON(object.deadLetter)
         : isSet(object.dead_letter)
-        ? Empty.fromJSON(object.dead_letter)
-        : undefined,
+          ? Empty.fromJSON(object.dead_letter)
+          : undefined,
     };
   },
 
@@ -4236,15 +4252,18 @@ export const NackRetry: MessageFns<NackRetry> = {
   },
   fromPartial<I extends Exact<DeepPartial<NackRetry>, I>>(object: I): NackRetry {
     const message = createBaseNackRetry();
-    message.default = (object.default !== undefined && object.default !== null)
-      ? Empty.fromPartial(object.default)
-      : undefined;
-    message.delay = (object.delay !== undefined && object.delay !== null)
-      ? Duration.fromPartial(object.delay)
-      : undefined;
-    message.deadLetter = (object.deadLetter !== undefined && object.deadLetter !== null)
-      ? Empty.fromPartial(object.deadLetter)
-      : undefined;
+    message.default =
+      object.default !== undefined && object.default !== null
+        ? Empty.fromPartial(object.default)
+        : undefined;
+    message.delay =
+      object.delay !== undefined && object.delay !== null
+        ? Duration.fromPartial(object.delay)
+        : undefined;
+    message.deadLetter =
+      object.deadLetter !== undefined && object.deadLetter !== null
+        ? Empty.fromPartial(object.deadLetter)
+        : undefined;
     return message;
   },
 };
@@ -4301,13 +4320,13 @@ export const NackResponse: MessageFns<NackResponse> = {
       jobId: isSet(object.jobId)
         ? globalThis.String(object.jobId)
         : isSet(object.job_id)
-        ? globalThis.String(object.job_id)
-        : "",
+          ? globalThis.String(object.job_id)
+          : "",
       deadLettered: isSet(object.deadLettered)
         ? globalThis.Boolean(object.deadLettered)
         : isSet(object.dead_lettered)
-        ? globalThis.Boolean(object.dead_lettered)
-        : false,
+          ? globalThis.Boolean(object.dead_lettered)
+          : false,
     };
   },
 
@@ -4407,19 +4426,19 @@ export const ExtendRequest: MessageFns<ExtendRequest> = {
       jobId: isSet(object.jobId)
         ? globalThis.String(object.jobId)
         : isSet(object.job_id)
-        ? globalThis.String(object.job_id)
-        : "",
+          ? globalThis.String(object.job_id)
+          : "",
       attempt: isSet(object.attempt) ? globalThis.Number(object.attempt) : 0,
       leaseDuration: isSet(object.leaseDuration)
         ? Duration.fromJSON(object.leaseDuration)
         : isSet(object.lease_duration)
-        ? Duration.fromJSON(object.lease_duration)
-        : undefined,
+          ? Duration.fromJSON(object.lease_duration)
+          : undefined,
       workerId: isSet(object.workerId)
         ? globalThis.String(object.workerId)
         : isSet(object.worker_id)
-        ? globalThis.String(object.worker_id)
-        : undefined,
+          ? globalThis.String(object.worker_id)
+          : undefined,
     };
   },
 
@@ -4447,9 +4466,10 @@ export const ExtendRequest: MessageFns<ExtendRequest> = {
     const message = createBaseExtendRequest();
     message.jobId = object.jobId ?? "";
     message.attempt = object.attempt ?? 0;
-    message.leaseDuration = (object.leaseDuration !== undefined && object.leaseDuration !== null)
-      ? Duration.fromPartial(object.leaseDuration)
-      : undefined;
+    message.leaseDuration =
+      object.leaseDuration !== undefined && object.leaseDuration !== null
+        ? Duration.fromPartial(object.leaseDuration)
+        : undefined;
     message.workerId = object.workerId ?? undefined;
     return message;
   },
@@ -4507,13 +4527,13 @@ export const ExtendResponse: MessageFns<ExtendResponse> = {
       jobId: isSet(object.jobId)
         ? globalThis.String(object.jobId)
         : isSet(object.job_id)
-        ? globalThis.String(object.job_id)
-        : "",
+          ? globalThis.String(object.job_id)
+          : "",
       leaseExpiresAt: isSet(object.leaseExpiresAt)
         ? fromJsonTimestamp(object.leaseExpiresAt)
         : isSet(object.lease_expires_at)
-        ? fromJsonTimestamp(object.lease_expires_at)
-        : undefined,
+          ? fromJsonTimestamp(object.lease_expires_at)
+          : undefined,
     };
   },
 
@@ -4626,18 +4646,18 @@ export const DeadLetterRecord: MessageFns<DeadLetterRecord> = {
       failedAt: isSet(object.failedAt)
         ? fromJsonTimestamp(object.failedAt)
         : isSet(object.failed_at)
-        ? fromJsonTimestamp(object.failed_at)
-        : undefined,
+          ? fromJsonTimestamp(object.failed_at)
+          : undefined,
       finalAttempt: isSet(object.finalAttempt)
         ? globalThis.Number(object.finalAttempt)
         : isSet(object.final_attempt)
-        ? globalThis.Number(object.final_attempt)
-        : 0,
+          ? globalThis.Number(object.final_attempt)
+          : 0,
       lastReason: isSet(object.lastReason)
         ? globalThis.String(object.lastReason)
         : isSet(object.last_reason)
-        ? globalThis.String(object.last_reason)
-        : undefined,
+          ? globalThis.String(object.last_reason)
+          : undefined,
     };
   },
 
@@ -4666,7 +4686,8 @@ export const DeadLetterRecord: MessageFns<DeadLetterRecord> = {
   },
   fromPartial<I extends Exact<DeepPartial<DeadLetterRecord>, I>>(object: I): DeadLetterRecord {
     const message = createBaseDeadLetterRecord();
-    message.job = (object.job !== undefined && object.job !== null) ? Job.fromPartial(object.job) : undefined;
+    message.job =
+      object.job !== undefined && object.job !== null ? Job.fromPartial(object.job) : undefined;
     message.cause = object.cause ?? 0;
     message.failedAt = object.failedAt ?? undefined;
     message.finalAttempt = object.finalAttempt ?? 0;
@@ -4680,7 +4701,10 @@ function createBaseDrainDeadLettersRequest(): DrainDeadLettersRequest {
 }
 
 export const DrainDeadLettersRequest: MessageFns<DrainDeadLettersRequest> = {
-  encode(message: DrainDeadLettersRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+  encode(
+    message: DrainDeadLettersRequest,
+    writer: BinaryWriter = new BinaryWriter(),
+  ): BinaryWriter {
     if (message.queue !== undefined) {
       writer.uint32(10).string(message.queue);
     }
@@ -4740,10 +4764,14 @@ export const DrainDeadLettersRequest: MessageFns<DrainDeadLettersRequest> = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DrainDeadLettersRequest>, I>>(base?: I): DrainDeadLettersRequest {
+  create<I extends Exact<DeepPartial<DrainDeadLettersRequest>, I>>(
+    base?: I,
+  ): DrainDeadLettersRequest {
     return DrainDeadLettersRequest.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<DrainDeadLettersRequest>, I>>(object: I): DrainDeadLettersRequest {
+  fromPartial<I extends Exact<DeepPartial<DrainDeadLettersRequest>, I>>(
+    object: I,
+  ): DrainDeadLettersRequest {
     const message = createBaseDrainDeadLettersRequest();
     message.queue = object.queue ?? undefined;
     message.max = object.max ?? undefined;
@@ -4756,7 +4784,10 @@ function createBaseDrainDeadLettersResponse(): DrainDeadLettersResponse {
 }
 
 export const DrainDeadLettersResponse: MessageFns<DrainDeadLettersResponse> = {
-  encode(message: DrainDeadLettersResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+  encode(
+    message: DrainDeadLettersResponse,
+    writer: BinaryWriter = new BinaryWriter(),
+  ): BinaryWriter {
     for (const v of message.records) {
       DeadLetterRecord.encode(v!, writer.uint32(10).fork()).join();
     }
@@ -4803,10 +4834,14 @@ export const DrainDeadLettersResponse: MessageFns<DrainDeadLettersResponse> = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DrainDeadLettersResponse>, I>>(base?: I): DrainDeadLettersResponse {
+  create<I extends Exact<DeepPartial<DrainDeadLettersResponse>, I>>(
+    base?: I,
+  ): DrainDeadLettersResponse {
     return DrainDeadLettersResponse.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<DrainDeadLettersResponse>, I>>(object: I): DrainDeadLettersResponse {
+  fromPartial<I extends Exact<DeepPartial<DrainDeadLettersResponse>, I>>(
+    object: I,
+  ): DrainDeadLettersResponse {
     const message = createBaseDrainDeadLettersResponse();
     message.records = object.records?.map((e) => DeadLetterRecord.fromPartial(e)) || [];
     return message;
@@ -4900,7 +4935,9 @@ export const GetServerInfoResponse: MessageFns<GetServerInfoResponse> = {
     }
     if (message.maxPayloadBytes !== 0n) {
       if (BigInt.asUintN(64, message.maxPayloadBytes) !== message.maxPayloadBytes) {
-        throw new globalThis.Error("value provided for field message.maxPayloadBytes of type uint64 too large");
+        throw new globalThis.Error(
+          "value provided for field message.maxPayloadBytes of type uint64 too large",
+        );
       }
       writer.uint32(48).uint64(message.maxPayloadBytes);
     }
@@ -4909,7 +4946,9 @@ export const GetServerInfoResponse: MessageFns<GetServerInfoResponse> = {
     }
     if (message.maxCustomTotalBytes !== 0n) {
       if (BigInt.asUintN(64, message.maxCustomTotalBytes) !== message.maxCustomTotalBytes) {
-        throw new globalThis.Error("value provided for field message.maxCustomTotalBytes of type uint64 too large");
+        throw new globalThis.Error(
+          "value provided for field message.maxCustomTotalBytes of type uint64 too large",
+        );
       }
       writer.uint32(64).uint64(message.maxCustomTotalBytes);
     }
@@ -5133,103 +5172,103 @@ export const GetServerInfoResponse: MessageFns<GetServerInfoResponse> = {
       serverVersion: isSet(object.serverVersion)
         ? globalThis.String(object.serverVersion)
         : isSet(object.server_version)
-        ? globalThis.String(object.server_version)
-        : "",
+          ? globalThis.String(object.server_version)
+          : "",
       supportedProtocolVersions: globalThis.Array.isArray(object?.supportedProtocolVersions)
         ? object.supportedProtocolVersions.map((e: any) => globalThis.String(e))
         : globalThis.Array.isArray(object?.supported_protocol_versions)
-        ? object.supported_protocol_versions.map((e: any) => globalThis.String(e))
-        : [],
+          ? object.supported_protocol_versions.map((e: any) => globalThis.String(e))
+          : [],
       serverTime: isSet(object.serverTime)
         ? fromJsonTimestamp(object.serverTime)
         : isSet(object.server_time)
-        ? fromJsonTimestamp(object.server_time)
-        : undefined,
+          ? fromJsonTimestamp(object.server_time)
+          : undefined,
       restrictsEncodings: isSet(object.restrictsEncodings)
         ? globalThis.Boolean(object.restrictsEncodings)
         : isSet(object.restricts_encodings)
-        ? globalThis.Boolean(object.restricts_encodings)
-        : false,
+          ? globalThis.Boolean(object.restricts_encodings)
+          : false,
       allowedEncodings: globalThis.Array.isArray(object?.allowedEncodings)
         ? object.allowedEncodings.map((e: any) => globalThis.String(e))
         : globalThis.Array.isArray(object?.allowed_encodings)
-        ? object.allowed_encodings.map((e: any) => globalThis.String(e))
-        : [],
+          ? object.allowed_encodings.map((e: any) => globalThis.String(e))
+          : [],
       maxPayloadBytes: isSet(object.maxPayloadBytes)
         ? BigInt(object.maxPayloadBytes)
         : isSet(object.max_payload_bytes)
-        ? BigInt(object.max_payload_bytes)
-        : 0n,
+          ? BigInt(object.max_payload_bytes)
+          : 0n,
       maxCustomEntries: isSet(object.maxCustomEntries)
         ? globalThis.Number(object.maxCustomEntries)
         : isSet(object.max_custom_entries)
-        ? globalThis.Number(object.max_custom_entries)
-        : 0,
+          ? globalThis.Number(object.max_custom_entries)
+          : 0,
       maxCustomTotalBytes: isSet(object.maxCustomTotalBytes)
         ? BigInt(object.maxCustomTotalBytes)
         : isSet(object.max_custom_total_bytes)
-        ? BigInt(object.max_custom_total_bytes)
-        : 0n,
+          ? BigInt(object.max_custom_total_bytes)
+          : 0n,
       maxCustomKeyBytes: isSet(object.maxCustomKeyBytes)
         ? globalThis.Number(object.maxCustomKeyBytes)
         : isSet(object.max_custom_key_bytes)
-        ? globalThis.Number(object.max_custom_key_bytes)
-        : 0,
+          ? globalThis.Number(object.max_custom_key_bytes)
+          : 0,
       maxQueueNameBytes: isSet(object.maxQueueNameBytes)
         ? globalThis.Number(object.maxQueueNameBytes)
         : isSet(object.max_queue_name_bytes)
-        ? globalThis.Number(object.max_queue_name_bytes)
-        : 0,
+          ? globalThis.Number(object.max_queue_name_bytes)
+          : 0,
       maxJobTypeBytes: isSet(object.maxJobTypeBytes)
         ? globalThis.Number(object.maxJobTypeBytes)
         : isSet(object.max_job_type_bytes)
-        ? globalThis.Number(object.max_job_type_bytes)
-        : 0,
+          ? globalThis.Number(object.max_job_type_bytes)
+          : 0,
       maxIdempotencyKeyBytes: isSet(object.maxIdempotencyKeyBytes)
         ? globalThis.Number(object.maxIdempotencyKeyBytes)
         : isSet(object.max_idempotency_key_bytes)
-        ? globalThis.Number(object.max_idempotency_key_bytes)
-        : 0,
+          ? globalThis.Number(object.max_idempotency_key_bytes)
+          : 0,
       maxScheduleHorizon: isSet(object.maxScheduleHorizon)
         ? Duration.fromJSON(object.maxScheduleHorizon)
         : isSet(object.max_schedule_horizon)
-        ? Duration.fromJSON(object.max_schedule_horizon)
-        : undefined,
+          ? Duration.fromJSON(object.max_schedule_horizon)
+          : undefined,
       maxEnqueueBatch: isSet(object.maxEnqueueBatch)
         ? globalThis.Number(object.maxEnqueueBatch)
         : isSet(object.max_enqueue_batch)
-        ? globalThis.Number(object.max_enqueue_batch)
-        : 0,
+          ? globalThis.Number(object.max_enqueue_batch)
+          : 0,
       maxReserveBatch: isSet(object.maxReserveBatch)
         ? globalThis.Number(object.maxReserveBatch)
         : isSet(object.max_reserve_batch)
-        ? globalThis.Number(object.max_reserve_batch)
-        : 0,
+          ? globalThis.Number(object.max_reserve_batch)
+          : 0,
       maxReserveQueues: isSet(object.maxReserveQueues)
         ? globalThis.Number(object.maxReserveQueues)
         : isSet(object.max_reserve_queues)
-        ? globalThis.Number(object.max_reserve_queues)
-        : 0,
+          ? globalThis.Number(object.max_reserve_queues)
+          : 0,
       maxWaitTimeout: isSet(object.maxWaitTimeout)
         ? Duration.fromJSON(object.maxWaitTimeout)
         : isSet(object.max_wait_timeout)
-        ? Duration.fromJSON(object.max_wait_timeout)
-        : undefined,
+          ? Duration.fromJSON(object.max_wait_timeout)
+          : undefined,
       maxLeaseDuration: isSet(object.maxLeaseDuration)
         ? Duration.fromJSON(object.maxLeaseDuration)
         : isSet(object.max_lease_duration)
-        ? Duration.fromJSON(object.max_lease_duration)
-        : undefined,
+          ? Duration.fromJSON(object.max_lease_duration)
+          : undefined,
       strictQueues: isSet(object.strictQueues)
         ? globalThis.Boolean(object.strictQueues)
         : isSet(object.strict_queues)
-        ? globalThis.Boolean(object.strict_queues)
-        : false,
+          ? globalThis.Boolean(object.strict_queues)
+          : false,
       deadLetterRetentionEnabled: isSet(object.deadLetterRetentionEnabled)
         ? globalThis.Boolean(object.deadLetterRetentionEnabled)
         : isSet(object.dead_letter_retention_enabled)
-        ? globalThis.Boolean(object.dead_letter_retention_enabled)
-        : false,
+          ? globalThis.Boolean(object.dead_letter_retention_enabled)
+          : false,
     };
   },
 
@@ -5301,7 +5340,9 @@ export const GetServerInfoResponse: MessageFns<GetServerInfoResponse> = {
   create<I extends Exact<DeepPartial<GetServerInfoResponse>, I>>(base?: I): GetServerInfoResponse {
     return GetServerInfoResponse.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<GetServerInfoResponse>, I>>(object: I): GetServerInfoResponse {
+  fromPartial<I extends Exact<DeepPartial<GetServerInfoResponse>, I>>(
+    object: I,
+  ): GetServerInfoResponse {
     const message = createBaseGetServerInfoResponse();
     message.serverVersion = object.serverVersion ?? "";
     message.supportedProtocolVersions = object.supportedProtocolVersions?.map((e) => e) || [];
@@ -5315,18 +5356,21 @@ export const GetServerInfoResponse: MessageFns<GetServerInfoResponse> = {
     message.maxQueueNameBytes = object.maxQueueNameBytes ?? 0;
     message.maxJobTypeBytes = object.maxJobTypeBytes ?? 0;
     message.maxIdempotencyKeyBytes = object.maxIdempotencyKeyBytes ?? 0;
-    message.maxScheduleHorizon = (object.maxScheduleHorizon !== undefined && object.maxScheduleHorizon !== null)
-      ? Duration.fromPartial(object.maxScheduleHorizon)
-      : undefined;
+    message.maxScheduleHorizon =
+      object.maxScheduleHorizon !== undefined && object.maxScheduleHorizon !== null
+        ? Duration.fromPartial(object.maxScheduleHorizon)
+        : undefined;
     message.maxEnqueueBatch = object.maxEnqueueBatch ?? 0;
     message.maxReserveBatch = object.maxReserveBatch ?? 0;
     message.maxReserveQueues = object.maxReserveQueues ?? 0;
-    message.maxWaitTimeout = (object.maxWaitTimeout !== undefined && object.maxWaitTimeout !== null)
-      ? Duration.fromPartial(object.maxWaitTimeout)
-      : undefined;
-    message.maxLeaseDuration = (object.maxLeaseDuration !== undefined && object.maxLeaseDuration !== null)
-      ? Duration.fromPartial(object.maxLeaseDuration)
-      : undefined;
+    message.maxWaitTimeout =
+      object.maxWaitTimeout !== undefined && object.maxWaitTimeout !== null
+        ? Duration.fromPartial(object.maxWaitTimeout)
+        : undefined;
+    message.maxLeaseDuration =
+      object.maxLeaseDuration !== undefined && object.maxLeaseDuration !== null
+        ? Duration.fromPartial(object.maxLeaseDuration)
+        : undefined;
     message.strictQueues = object.strictQueues ?? false;
     message.deadLetterRetentionEnabled = object.deadLetterRetentionEnabled ?? false;
     return message;
@@ -5355,11 +5399,13 @@ export const QueueServiceService = {
     path: "/sepp.v1.QueueService/EnqueueBatch" as const,
     requestStream: false as const,
     responseStream: false as const,
-    requestSerialize: (value: EnqueueBatchRequest): Buffer => Buffer.from(EnqueueBatchRequest.encode(value).finish()),
+    requestSerialize: (value: EnqueueBatchRequest): Buffer =>
+      Buffer.from(EnqueueBatchRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): EnqueueBatchRequest => EnqueueBatchRequest.decode(value),
     responseSerialize: (value: EnqueueBatchResponse): Buffer =>
       Buffer.from(EnqueueBatchResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): EnqueueBatchResponse => EnqueueBatchResponse.decode(value),
+    responseDeserialize: (value: Buffer): EnqueueBatchResponse =>
+      EnqueueBatchResponse.decode(value),
   },
   /**
    * Atomic batch enqueue. Either every job is enqueued or none are.
@@ -5377,11 +5423,13 @@ export const QueueServiceService = {
     path: "/sepp.v1.QueueService/EnqueueAtomic" as const,
     requestStream: false as const,
     responseStream: false as const,
-    requestSerialize: (value: EnqueueBatchRequest): Buffer => Buffer.from(EnqueueBatchRequest.encode(value).finish()),
+    requestSerialize: (value: EnqueueBatchRequest): Buffer =>
+      Buffer.from(EnqueueBatchRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): EnqueueBatchRequest => EnqueueBatchRequest.decode(value),
     responseSerialize: (value: EnqueueAtomicResponse): Buffer =>
       Buffer.from(EnqueueAtomicResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): EnqueueAtomicResponse => EnqueueAtomicResponse.decode(value),
+    responseDeserialize: (value: Buffer): EnqueueAtomicResponse =>
+      EnqueueAtomicResponse.decode(value),
   },
   /**
    * Long-poll reserve. Returns zero or more jobs, or times out with an empty list.
@@ -5397,9 +5445,11 @@ export const QueueServiceService = {
     path: "/sepp.v1.QueueService/Reserve" as const,
     requestStream: false as const,
     responseStream: false as const,
-    requestSerialize: (value: ReserveRequest): Buffer => Buffer.from(ReserveRequest.encode(value).finish()),
+    requestSerialize: (value: ReserveRequest): Buffer =>
+      Buffer.from(ReserveRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): ReserveRequest => ReserveRequest.decode(value),
-    responseSerialize: (value: ReserveResponse): Buffer => Buffer.from(ReserveResponse.encode(value).finish()),
+    responseSerialize: (value: ReserveResponse): Buffer =>
+      Buffer.from(ReserveResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): ReserveResponse => ReserveResponse.decode(value),
   },
   /**
@@ -5420,7 +5470,8 @@ export const QueueServiceService = {
     responseStream: false as const,
     requestSerialize: (value: AckRequest): Buffer => Buffer.from(AckRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): AckRequest => AckRequest.decode(value),
-    responseSerialize: (value: AckResponse): Buffer => Buffer.from(AckResponse.encode(value).finish()),
+    responseSerialize: (value: AckResponse): Buffer =>
+      Buffer.from(AckResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): AckResponse => AckResponse.decode(value),
   },
   /** Negative-acknowledge with retry directive. Same status codes as Ack. */
@@ -5428,9 +5479,11 @@ export const QueueServiceService = {
     path: "/sepp.v1.QueueService/Nack" as const,
     requestStream: false as const,
     responseStream: false as const,
-    requestSerialize: (value: NackRequest): Buffer => Buffer.from(NackRequest.encode(value).finish()),
+    requestSerialize: (value: NackRequest): Buffer =>
+      Buffer.from(NackRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): NackRequest => NackRequest.decode(value),
-    responseSerialize: (value: NackResponse): Buffer => Buffer.from(NackResponse.encode(value).finish()),
+    responseSerialize: (value: NackResponse): Buffer =>
+      Buffer.from(NackResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): NackResponse => NackResponse.decode(value),
   },
   /** Extend the lease on an in-flight job. Same status codes as Ack. */
@@ -5438,9 +5491,11 @@ export const QueueServiceService = {
     path: "/sepp.v1.QueueService/Extend" as const,
     requestStream: false as const,
     responseStream: false as const,
-    requestSerialize: (value: ExtendRequest): Buffer => Buffer.from(ExtendRequest.encode(value).finish()),
+    requestSerialize: (value: ExtendRequest): Buffer =>
+      Buffer.from(ExtendRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): ExtendRequest => ExtendRequest.decode(value),
-    responseSerialize: (value: ExtendResponse): Buffer => Buffer.from(ExtendResponse.encode(value).finish()),
+    responseSerialize: (value: ExtendResponse): Buffer =>
+      Buffer.from(ExtendResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): ExtendResponse => ExtendResponse.decode(value),
   },
   /**
@@ -5467,21 +5522,25 @@ export const QueueServiceService = {
     responseStream: false as const,
     requestSerialize: (value: DrainDeadLettersRequest): Buffer =>
       Buffer.from(DrainDeadLettersRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): DrainDeadLettersRequest => DrainDeadLettersRequest.decode(value),
+    requestDeserialize: (value: Buffer): DrainDeadLettersRequest =>
+      DrainDeadLettersRequest.decode(value),
     responseSerialize: (value: DrainDeadLettersResponse): Buffer =>
       Buffer.from(DrainDeadLettersResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): DrainDeadLettersResponse => DrainDeadLettersResponse.decode(value),
+    responseDeserialize: (value: Buffer): DrainDeadLettersResponse =>
+      DrainDeadLettersResponse.decode(value),
   },
   /** Get server info and capabilities. INTERNAL on storage failure; otherwise infallible. */
   getServerInfo: {
     path: "/sepp.v1.QueueService/GetServerInfo" as const,
     requestStream: false as const,
     responseStream: false as const,
-    requestSerialize: (value: GetServerInfoRequest): Buffer => Buffer.from(GetServerInfoRequest.encode(value).finish()),
+    requestSerialize: (value: GetServerInfoRequest): Buffer =>
+      Buffer.from(GetServerInfoRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): GetServerInfoRequest => GetServerInfoRequest.decode(value),
     responseSerialize: (value: GetServerInfoResponse): Buffer =>
       Buffer.from(GetServerInfoResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GetServerInfoResponse => GetServerInfoResponse.decode(value),
+    responseDeserialize: (value: Buffer): GetServerInfoResponse =>
+      GetServerInfoResponse.decode(value),
   },
 } as const;
 
@@ -5653,7 +5712,10 @@ export interface QueueServiceClient extends Client {
    *   UNAUTHENTICATED      - missing or invalid API key
    *   INTERNAL             - server-side storage failure
    */
-  ack(request: AckRequest, callback: (error: ServiceError | null, response: AckResponse) => void): ClientUnaryCall;
+  ack(
+    request: AckRequest,
+    callback: (error: ServiceError | null, response: AckResponse) => void,
+  ): ClientUnaryCall;
   ack(
     request: AckRequest,
     metadata: Metadata,
@@ -5666,7 +5728,10 @@ export interface QueueServiceClient extends Client {
     callback: (error: ServiceError | null, response: AckResponse) => void,
   ): ClientUnaryCall;
   /** Negative-acknowledge with retry directive. Same status codes as Ack. */
-  nack(request: NackRequest, callback: (error: ServiceError | null, response: NackResponse) => void): ClientUnaryCall;
+  nack(
+    request: NackRequest,
+    callback: (error: ServiceError | null, response: NackResponse) => void,
+  ): ClientUnaryCall;
   nack(
     request: NackRequest,
     metadata: Metadata,
@@ -5749,7 +5814,11 @@ export const QueueServiceClient = makeGenericClientConstructor(
   QueueServiceService,
   "sepp.v1.QueueService",
 ) as unknown as {
-  new (address: string, credentials: ChannelCredentials, options?: Partial<ClientOptions>): QueueServiceClient;
+  new (
+    address: string,
+    credentials: ChannelCredentials,
+    options?: Partial<ClientOptions>,
+  ): QueueServiceClient;
   service: typeof QueueServiceService;
   serviceName: string;
 };
@@ -5764,14 +5833,19 @@ function base64FromBytes(arr: Uint8Array): string {
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | bigint | undefined;
 
-export type DeepPartial<T> = T extends Builtin ? T
-  : T extends globalThis.Array<infer U> ? globalThis.Array<DeepPartial<U>>
-  : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
-  : T extends {} ? { [K in keyof T]?: DeepPartial<T[K]> }
-  : Partial<T>;
+export type DeepPartial<T> = T extends Builtin
+  ? T
+  : T extends globalThis.Array<infer U>
+    ? globalThis.Array<DeepPartial<U>>
+    : T extends ReadonlyArray<infer U>
+      ? ReadonlyArray<DeepPartial<U>>
+      : T extends {}
+        ? { [K in keyof T]?: DeepPartial<T[K]> }
+        : Partial<T>;
 
 type KeysOfUnion<T> = T extends T ? keyof T : never;
-export type Exact<P, I extends P> = P extends Builtin ? P
+export type Exact<P, I extends P> = P extends Builtin
+  ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
 
 function toTimestamp(date: Date): Timestamp {

@@ -64,7 +64,10 @@ export function getOtel(): typeof OtelApi | null {
 }
 
 /** The active span's W3C trace context, or null if there is no valid active span. */
-export function currentTraceContext(): { traceparent: string; tracestate?: string } | null {
+export function currentTraceContext(): {
+  traceparent: string;
+  tracestate?: string;
+} | null {
   const api = otel;
   if (!api) return null;
   const span = api.trace.getSpan(api.context.active());
@@ -104,7 +107,10 @@ export function injectJobTrace(jobs: PbEnqueueRequest[]): void {
   if (!tc) return;
   for (const job of jobs) {
     if (!job.traceContext) {
-      job.traceContext = { traceparent: tc.traceparent, tracestate: tc.tracestate };
+      job.traceContext = {
+        traceparent: tc.traceparent,
+        tracestate: tc.tracestate,
+      };
     }
   }
 }
