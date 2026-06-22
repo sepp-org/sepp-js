@@ -37,6 +37,7 @@ export {
 } from "./errors";
 /** The generated protobuf message types and gRPC stub, for advanced use. */
 export * as pb from "./gen/sepp/v1/queue";
+export type { Logger } from "./logger";
 export type { RetryPolicyOptions } from "./retry";
 export { RetryPolicy } from "./retry";
 export type {

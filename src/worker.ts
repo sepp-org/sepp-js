@@ -18,6 +18,7 @@ import {
   JobNotFoundError,
   ValidationError,
 } from "./errors";
+import { createLogger, type Logger, noopLogger } from "./logger";
 import { getOtel, loadOtel, spanContextFromTraceparent } from "./trace";
 import { type Job, type JobCtx, type Payload, type ReserveOptions, RetryDirective } from "./types";
 
@@ -73,6 +74,8 @@ export interface WorkerOptions {
   autoExtendInterval?: number;
   /** Stable worker id. Defaults to `<hostname>-<pid>-<rand>`. */
   workerId?: string;
+  /** Logger for worker diagnostics. Defaults to silent (no-op). */
+  logger?: Logger;
 }
 
 /** A handle for triggering a {@link Worker}'s graceful shutdown. */
@@ -113,6 +116,7 @@ export class Worker {
   readonly #handlers = new Map<string, Handler>();
   #catchAll: Handler | undefined;
   readonly #shutdown = new ShutdownHandle();
+  readonly #logger: Logger;
 
   constructor(client: SeppClient, opts: WorkerOptions) {
     if (opts.queues.length === 0) throw new ValidationError("at least one queue must be specified");
@@ -134,6 +138,7 @@ export class Worker {
     this.#maxInFlight = Math.max(1, opts.maxInFlight ?? 16);
     this.#reserveErrorBackoff = opts.reserveErrorBackoff ?? 1000;
     this.#workerId = opts.workerId ?? defaultWorkerId();
+    this.#logger = createLogger(opts.logger ?? noopLogger());
     this.#autoExtend = opts.autoExtend === true || opts.autoExtendInterval !== undefined;
     this.#autoExtendInterval =
       opts.autoExtendInterval !== undefined ? Math.max(1, opts.autoExtendInterval) : undefined;
@@ -183,8 +188,9 @@ export class Worker {
 
     const spawn = (job: Job): void => {
       const p = this.#processJob(job)
-        // eslint-disable-next-line no-console
-        .catch((err) => console.error("sepp worker: unexpected error processing job:", err))
+        .catch((err) =>
+          this.#logger.error("unexpected error processing job", { error: String(err) }),
+        )
         .finally(() => {
           sem.release();
           inFlight.delete(p);
@@ -213,8 +219,7 @@ export class Worker {
       try {
         jobs = await this.#client.reserve(reserveOpts);
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn("sepp worker: reserve error; backing off:", err);
+        this.#logger.warn("reserve error; backing off", { error: String(err) });
         sem.release();
         if (this.#shutdown.isShutdown) break;
         await sleepUntil(this.#reserveErrorBackoff, this.#shutdown.signal);
@@ -268,8 +273,7 @@ export class Worker {
   async #process(payload: Payload | undefined, ctx: JobCtx): Promise<void> {
     const handler = this.#handlers.get(ctx.jobType) ?? this.#catchAll;
     if (!handler) {
-      // eslint-disable-next-line no-console
-      console.warn(`sepp worker: no handler registered for job_type '${ctx.jobType}'`);
+      this.#logger.warn("no handler registered", { jobType: ctx.jobType });
       try {
         await this.#client.nack(ctx, {
           reason: "no handler registered for job_type",
@@ -293,8 +297,7 @@ export class Worker {
         await heartbeat.catch(() => {});
       }
       if (ctx._leaseLost) {
-        // eslint-disable-next-line no-console
-        console.error("sepp worker: lease lost; skipping ack/nack (job will be redelivered)");
+        this.#logger.error("lease lost; skipping ack/nack (job will be redelivered)");
         return;
       }
     } else {
@@ -305,19 +308,14 @@ export class Worker {
       await this.#dispose(ctx, disposition);
     } catch (err) {
       if (err instanceof JobNotFoundError) {
-        // After retries, JobNotFound is ambiguous: an earlier attempt of this
-        // same call may have succeeded with only the response lost.
-        // eslint-disable-next-line no-console
-        console.error(
-          "sepp worker: ack/nack got JobNotFound; either the lease was lost (job will be redelivered) or a retried ack/nack already succeeded and only its response was lost:",
-          err,
+        this.#logger.error(
+          "ack/nack got JobNotFound; either the lease was lost (job will be redelivered) or a retried ack/nack already succeeded and only its response was lost",
+          { error: String(err) },
         );
       } else {
-        // eslint-disable-next-line no-console
-        console.error(
-          "sepp worker: failed to ack/nack job; it will be redelivered after lease expiry:",
-          err,
-        );
+        this.#logger.error("failed to ack/nack job; it will be redelivered after lease expiry", {
+          error: String(err),
+        });
       }
     }
   }
@@ -349,8 +347,7 @@ export class Worker {
       return;
     }
     // A thrown non-HandlerError is the analog of the Rust handler panic.
-    // eslint-disable-next-line no-console
-    console.error("sepp worker: handler threw; nacking:", d.error);
+    this.#logger.error("handler threw; nacking", { error: String(d.error) });
     await this.#client.nack(ctx, { reason: "handler threw an error" });
   }
 
@@ -368,21 +365,20 @@ export class Worker {
         await ctx.extend(this.#leaseDuration);
       } catch (err) {
         if (err instanceof AttemptMismatchError || err instanceof JobNotFoundError) {
-          // eslint-disable-next-line no-console
-          console.error(
-            "sepp worker: lease reassigned by server; aborting handler to avoid double processing",
+          this.#logger.error(
+            "lease reassigned by server; aborting handler to avoid double processing",
           );
           ctx._markLeaseLost();
           return;
         }
         if (Date.now() >= ctx._knownExpiryMs) {
-          // eslint-disable-next-line no-console
-          console.error("sepp worker: lease lost; aborting handler to avoid double processing");
+          this.#logger.error("lease lost; aborting handler to avoid double processing");
           ctx._markLeaseLost();
           return;
         }
-        // eslint-disable-next-line no-console
-        console.warn("sepp worker: lease extend failed; lease still valid, will retry:", err);
+        this.#logger.warn("lease extend failed; lease still valid, will retry", {
+          error: String(err),
+        });
       }
     }
   }

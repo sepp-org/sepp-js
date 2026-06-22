@@ -43,6 +43,7 @@ import {
   QueueServiceClient,
   type ReserveResponse,
 } from "./gen/sepp/v1/queue";
+import { createLogger, type Logger, noopLogger } from "./logger";
 import { RetryPolicy, withRetry } from "./retry";
 import { currentTraceContext, injectJobTrace, loadOtel } from "./trace";
 import {
@@ -97,6 +98,8 @@ export interface ConnectOptions {
   maxReceiveMessageBytes?: number;
   /** Extra gRPC channel options, merged over the defaults. */
   channelOptions?: ChannelOptions;
+  /** Logger for library diagnostics. Defaults to silent (no-op). */
+  logger?: Logger;
 }
 
 /** Options for {@link SeppClient.nack}. */
@@ -133,17 +136,20 @@ export class SeppClient {
   readonly #bearer: string | undefined;
   readonly #retry: RetryPolicy;
   readonly #rpcTimeout: number;
+  readonly #logger: Logger;
 
   private constructor(
     client: QueueServiceClient,
     bearer: string | undefined,
     retry: RetryPolicy,
     rpcTimeout: number,
+    logger: Logger,
   ) {
     this.#client = client;
     this.#bearer = bearer;
     this.#retry = retry;
     this.#rpcTimeout = rpcTimeout;
+    this.#logger = logger;
   }
 
   /**
@@ -155,6 +161,8 @@ export class SeppClient {
    */
   static async connect(address: string, opts: ConnectOptions = {}): Promise<SeppClient> {
     const { target, impliesTls } = parseAddress(address);
+
+    const logger = createLogger(opts.logger ?? noopLogger());
 
     let bearer: string | undefined;
     if (opts.apiKey !== undefined) {
@@ -169,9 +177,8 @@ export class SeppClient {
       opts.tlsDomain !== undefined;
 
     if (bearer && !useTls) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        "sepp: API key configured without TLS; it will be sent over the connection in plaintext",
+      logger.warn(
+        "API key configured without TLS; it will be sent over the connection in plaintext",
       );
     }
 
@@ -205,6 +212,7 @@ export class SeppClient {
       bearer,
       opts.retryPolicy ?? new RetryPolicy(),
       opts.rpcTimeout ?? DEFAULT_RPC_TIMEOUT_MS,
+      logger,
     );
   }
 
@@ -215,13 +223,14 @@ export class SeppClient {
    */
   static fromClient(
     client: QueueServiceClient,
-    opts: { retryPolicy?: RetryPolicy; rpcTimeout?: number } = {},
+    opts: { retryPolicy?: RetryPolicy; rpcTimeout?: number; logger?: Logger } = {},
   ): SeppClient {
     return new SeppClient(
       client,
       undefined,
       opts.retryPolicy ?? new RetryPolicy(),
       opts.rpcTimeout ?? DEFAULT_RPC_TIMEOUT_MS,
+      createLogger(opts.logger ?? noopLogger()),
     );
   }
 
@@ -332,8 +341,7 @@ export class SeppClient {
       try {
         jobs.push(jobFromPb(this.#extendInner, pbJob, opts.workerId));
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn("sepp: skipping malformed job in reserve response:", err);
+        this.#logger.warn("skipping malformed job in reserve response", { error: String(err) });
       }
     }
     return jobs.length > 0 ? jobs : null;
@@ -447,8 +455,9 @@ export class SeppClient {
       try {
         records.push(deadLetterRecordFromPb(r));
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn("sepp: skipping malformed dead-letter record in drain response:", err);
+        this.#logger.warn("skipping malformed dead-letter record in drain response", {
+          error: String(err),
+        });
       }
     }
     return records;

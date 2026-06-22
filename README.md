@@ -172,6 +172,28 @@ All errors extend `SeppError`. The notable ones:
 
 If `@opentelemetry/api` is installed and a tracer provider is registered, the client propagates the active W3C trace context: it stamps `traceparent`/`tracestate` onto enqueued jobs and outgoing metadata, and the `Worker` opens a `sepp.process` span linked back to the producer. With nothing installed, everything is a no-op. See [`examples/traced.ts`](./examples/traced.ts).
 
+## Logging
+
+The library is **silent by default**. To see diagnostics, pass a logger:
+
+```ts
+const client = await SeppClient.connect("127.0.0.1:50051", {
+  logger: console, // ad-hoc debugging
+});
+
+const worker = new Worker(client, {
+  queues: ["emails"],
+  leaseDuration: 30_000,
+  logger: {
+    // Structured logger (pino, winston, etc.)
+    warn: (msg, meta) => logger.warn(meta, msg),
+    error: (msg, meta) => logger.error(meta, msg),
+  },
+});
+```
+
+The `Logger` interface requires `warn` and `error` (both `(msg, meta?) => void`). `debug` and `info` are optional for future use.
+
 ## Dead-letter inspection
 
 ```ts
