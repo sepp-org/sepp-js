@@ -7,6 +7,7 @@ import {
   enqueueRequestToPb,
   jobFromPb,
   jobRejectionFromPb,
+  jobValidationErrorFromPb,
   msToDuration,
   primitiveFromPb,
   primitiveToPb,
@@ -344,5 +345,338 @@ describe("retryDirectiveToPb", () => {
     expect(retryDirectiveToPb(RetryDirective.after(5000))).toEqual({
       delay: { seconds: 5n, nanos: 0 },
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// All rejection variants
+// ---------------------------------------------------------------------------
+describe("jobRejectionFromPb — all variants", () => {
+  it("maps encoding_not_allowed", () => {
+    const r = jobRejectionFromPb({
+      encodingNotAllowed: { encoding: "xml", allowed: ["json"] },
+    });
+    expect(r).toEqual({ kind: "encoding_not_allowed", encoding: "xml", allowed: ["json"] });
+  });
+
+  it("maps job_type_not_allowed", () => {
+    const r = jobRejectionFromPb({
+      jobTypeNotAllowed: { jobType: "t", allowed: ["a", "b"] },
+    });
+    expect(r).toEqual({ kind: "job_type_not_allowed", jobType: "t", allowed: ["a", "b"] });
+  });
+
+  it("maps custom_entries_too_many", () => {
+    const r = jobRejectionFromPb({
+      customEntriesTooMany: { limit: 10, actual: 15 },
+    });
+    expect(r).toEqual({ kind: "custom_entries_too_many", limit: 10, actual: 15 });
+  });
+
+  it("maps custom_map_too_large", () => {
+    const r = jobRejectionFromPb({
+      customMapTooLarge: { limit: 1024n, actual: 2048n },
+    });
+    expect(r).toEqual({ kind: "custom_map_too_large", limit: 1024, actual: 2048 });
+  });
+
+  it("maps custom_key_too_long", () => {
+    const r = jobRejectionFromPb({
+      customKeyTooLong: { key: "longkey", limit: 64, actual: 100n },
+    });
+    expect(r).toEqual({
+      kind: "custom_key_too_long",
+      key: "longkey",
+      limit: 64,
+      actual: 100,
+    });
+  });
+
+  it("maps queue_name_too_long", () => {
+    const r = jobRejectionFromPb({
+      queueNameTooLong: { limit: 512, actual: 600n },
+    });
+    expect(r).toEqual({ kind: "queue_name_too_long", limit: 512, actual: 600 });
+  });
+
+  it("maps job_type_name_too_long", () => {
+    const r = jobRejectionFromPb({
+      jobTypeNameTooLong: { limit: 256, actual: 300n },
+    });
+    expect(r).toEqual({ kind: "job_type_name_too_long", limit: 256, actual: 300 });
+  });
+
+  it("maps idempotency_key_too_long", () => {
+    const r = jobRejectionFromPb({
+      idempotencyKeyTooLong: { limit: 128, actual: 200n },
+    });
+    expect(r).toEqual({ kind: "idempotency_key_too_long", limit: 128, actual: 200 });
+  });
+
+  it("maps scheduled_too_far", () => {
+    const r = jobRejectionFromPb({
+      scheduledTooFar: {
+        horizon: { seconds: 86_400n, nanos: 0 },
+        actual: new Date(1_700_000_000_000),
+      },
+    });
+    expect(r.kind).toBe("scheduled_too_far");
+    expect((r as any).horizon).toBe(86_400_000);
+    expect((r as any).actual).toEqual(new Date(1_700_000_000_000));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// jobValidationErrorFromPb
+// ---------------------------------------------------------------------------
+describe("jobValidationErrorFromPb", () => {
+  it("maps index and rejection", () => {
+    const err = jobValidationErrorFromPb({
+      index: 3,
+      rejection: { unknownQueue: { queue: "q" } },
+    });
+    expect(err.index).toBe(3);
+    expect(err.rejection).toEqual({ kind: "unknown_queue", queue: "q" });
+  });
+
+  it("falls back to unknown for missing rejection", () => {
+    const err = jobValidationErrorFromPb({ index: 0 });
+    expect(err.rejection).toEqual({ kind: "unknown" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Duration edge cases
+// ---------------------------------------------------------------------------
+describe("duration edge cases", () => {
+  it("handles negative ms to duration", () => {
+    const d = msToDuration(-1000);
+    expect(d.seconds).toBe(0n);
+    expect(d.nanos).toBe(0);
+  });
+
+  it("handles fractional ms", () => {
+    const d = msToDuration(1.7);
+    expect(d.seconds).toBe(0n);
+    expect(d.nanos).toBe(1_000_000);
+  });
+
+  it("handles large duration to ms", () => {
+    const ms = durationToMs({ seconds: 3600n, nanos: 0 });
+    expect(ms).toBe(3_600_000);
+  });
+
+  it("handles duration with only nanos", () => {
+    const ms = durationToMs({ seconds: 0n, nanos: 500_000_000 });
+    expect(ms).toBe(500);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Primitive encoding edge cases
+// ---------------------------------------------------------------------------
+describe("primitive encoding edge cases", () => {
+  it("encodes bigint as intValue", () => {
+    expect(primitiveToPb(9007199254740993n)).toEqual({ intValue: 9007199254740993n });
+  });
+
+  it("encodes negative integer as intValue", () => {
+    expect(primitiveToPb(-5)).toEqual({ intValue: -5n });
+  });
+
+  it("encodes false as boolValue", () => {
+    expect(primitiveToPb(false)).toEqual({ boolValue: false });
+  });
+
+  it("decodes intValue at MAX_SAFE_INTEGER as number", () => {
+    expect(primitiveFromPb({ intValue: BigInt(Number.MAX_SAFE_INTEGER) }, "k")).toBe(
+      Number.MAX_SAFE_INTEGER,
+    );
+  });
+
+  it("decodes intValue just above MAX_SAFE_INTEGER as bigint", () => {
+    const val = BigInt(Number.MAX_SAFE_INTEGER) + 1n;
+    expect(primitiveFromPb({ intValue: val }, "k")).toBe(val);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reserve options edge cases
+// ---------------------------------------------------------------------------
+describe("reserveOptionsToPb edge cases", () => {
+  it("rejects empty workerId", () => {
+    expect(() => reserveOptionsToPb({ queues: ["q"], leaseDuration: 1000, workerId: "" })).toThrow(
+      ValidationError,
+    );
+  });
+
+  it("accepts valid workerId", () => {
+    const pb = reserveOptionsToPb({
+      queues: ["q"],
+      leaseDuration: 1000,
+      workerId: "w1",
+    });
+    expect(pb.workerId).toBe("w1");
+  });
+
+  it("applies custom wait timeout", () => {
+    const pb = reserveOptionsToPb({
+      queues: ["q"],
+      leaseDuration: 1000,
+      waitTimeout: 5000,
+    });
+    expect(pb.waitTimeout).toEqual({ seconds: 5n, nanos: 0 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dead letter record — all cause variants
+// ---------------------------------------------------------------------------
+describe("deadLetterRecordFromPb — all causes", () => {
+  it("maps rejected cause", () => {
+    const r = deadLetterRecordFromPb({
+      job: validPbJob(),
+      cause: DeadLetterCause.DEAD_LETTER_CAUSE_REJECTED,
+      failedAt: new Date(1_700_000_100_000),
+      finalAttempt: 2,
+    });
+    expect(r.cause).toBe("rejected");
+  });
+
+  it("maps lease_expired cause", () => {
+    const r = deadLetterRecordFromPb({
+      job: validPbJob(),
+      cause: DeadLetterCause.DEAD_LETTER_CAUSE_LEASE_EXPIRED,
+      failedAt: new Date(1_700_000_100_000),
+      finalAttempt: 3,
+    });
+    expect(r.cause).toBe("lease_expired");
+  });
+
+  it("replays jobs with no payload", () => {
+    const r = deadLetterRecordFromPb({
+      job: validPbJob(),
+      cause: DeadLetterCause.DEAD_LETTER_CAUSE_ADMIN,
+      failedAt: new Date(1_700_000_100_000),
+      finalAttempt: 1,
+    });
+    const replay = r.toEnqueueRequest();
+    expect(replay.payload).toBeUndefined();
+  });
+
+  it("replays jobs with empty custom", () => {
+    const r = deadLetterRecordFromPb({
+      job: validPbJob(),
+      cause: DeadLetterCause.DEAD_LETTER_CAUSE_ATTEMPTS_EXHAUSTED,
+      failedAt: new Date(1_700_000_100_000),
+      finalAttempt: 5,
+    });
+    const replay = r.toEnqueueRequest();
+    expect(replay.custom).toEqual({});
+  });
+
+  it("preserves trace context in replay", () => {
+    const r = deadLetterRecordFromPb({
+      job: { ...validPbJob(), traceContext: { traceparent: VALID_TP } },
+      cause: DeadLetterCause.DEAD_LETTER_CAUSE_ATTEMPTS_EXHAUSTED,
+      failedAt: new Date(1_700_000_100_000),
+      finalAttempt: 3,
+    });
+    const replay = r.toEnqueueRequest();
+    expect(replay.traceContext?.traceparent).toBe(VALID_TP);
+  });
+
+  it("rejects missing failed_at", () => {
+    expect(() =>
+      deadLetterRecordFromPb({
+        job: validPbJob(),
+        cause: DeadLetterCause.DEAD_LETTER_CAUSE_ATTEMPTS_EXHAUSTED,
+        finalAttempt: 1,
+      }),
+    ).toThrow(JobConversionError);
+  });
+
+  it("rejects job with missing id in dl record", () => {
+    expect(() =>
+      deadLetterRecordFromPb({
+        job: { ...validPbJob(), id: "" },
+        cause: DeadLetterCause.DEAD_LETTER_CAUSE_ADMIN,
+        failedAt: new Date(1_700_000_100_000),
+        finalAttempt: 1,
+      }),
+    ).toThrow(JobConversionError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Server info — full field coverage
+// ---------------------------------------------------------------------------
+describe("serverInfoFromPb — full coverage", () => {
+  it("maps all numeric limits", () => {
+    const info = serverInfoFromPb({
+      serverVersion: "1.0.0",
+      supportedProtocolVersions: ["v1"],
+      serverTime: new Date(1_700_000_000_000),
+      restrictsEncodings: true,
+      allowedEncodings: ["application/json"],
+      maxPayloadBytes: 4096n,
+      maxCustomEntries: 32,
+      maxCustomTotalBytes: 8192n,
+      maxCustomKeyBytes: 128,
+      maxQueueNameBytes: 255,
+      maxJobTypeBytes: 100,
+      maxIdempotencyKeyBytes: 64,
+      maxScheduleHorizon: { seconds: 36_000n, nanos: 0 },
+      maxEnqueueBatch: 50,
+      maxReserveBatch: 25,
+      maxReserveQueues: 4,
+      maxWaitTimeout: { seconds: 15n, nanos: 0 },
+      maxLeaseDuration: { seconds: 120n, nanos: 0 },
+      strictQueues: false,
+      deadLetterRetentionEnabled: true,
+    });
+    expect(info.restrictsEncodings).toBe(true);
+    expect(info.allowedEncodings).toEqual(["application/json"]);
+    expect(info.maxCustomEntries).toBe(32);
+    expect(info.maxCustomTotalBytes).toBe(8192);
+    expect(info.maxCustomKeyBytes).toBe(128);
+    expect(info.maxQueueNameBytes).toBe(255);
+    expect(info.maxJobTypeBytes).toBe(100);
+    expect(info.maxIdempotencyKeyBytes).toBe(64);
+    expect(info.maxEnqueueBatch).toBe(50);
+    expect(info.maxReserveBatch).toBe(25);
+    expect(info.maxReserveQueues).toBe(4);
+    expect(info.maxLeaseDuration).toBe(120_000);
+    expect(info.deadLetterRetentionEnabled).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// enqueueRequestToPb with priority validation
+// ---------------------------------------------------------------------------
+describe("enqueueRequestToPb — priority validation", () => {
+  it("rejects out-of-range priority", () => {
+    expect(() => enqueueRequestToPb({ queue: "q", jobType: "t", priority: 10 })).toThrow(
+      PriorityRangeError,
+    );
+    expect(() => enqueueRequestToPb({ queue: "q", jobType: "t", priority: -1 })).toThrow(
+      PriorityRangeError,
+    );
+  });
+
+  it("accepts valid priority without throwing", () => {
+    const pb = enqueueRequestToPb({ queue: "q", jobType: "t", priority: 5 });
+    expect(pb.priority).toBe(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// jobFromPb — rejects missing leaseExpiresAt
+// ---------------------------------------------------------------------------
+describe("jobFromPb — lease timestamp", () => {
+  it("rejects missing leaseExpiresAt", () => {
+    expect(() =>
+      jobFromPb(noopExtend, { ...validPbJob(), leaseExpiresAt: undefined }, undefined),
+    ).toThrow(JobConversionError);
   });
 });
