@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "JavaScript/TypeScript client for the sepp durable job queue",
   "license": "MIT",
+  "author": "sepp-org",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sepp-org/sepp-js.git"
+  },
+  "homepage": "https://github.com/sepp-org/sepp-js#readme",
+  "bugs": {
+    "url": "https://github.com/sepp-org/sepp-js/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=22"

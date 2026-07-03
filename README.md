@@ -1,26 +1,61 @@
-# sepp
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/sepp-org/sepp-js/HEAD/media/sepp-js-paper-200.png">
+    <img alt="sepp-js" src="https://raw.githubusercontent.com/sepp-org/sepp-js/HEAD/media/sepp-js-ink-200.png" width="128" height="128">
+  </picture>
 
-JavaScript/TypeScript client for the [sepp](https://github.com/sepp-org/sepp) durable job queue.
+  <h1>sepp-js</h1>
 
-It provides both halves of the queue API:
+  <p>
+    <strong>The official JavaScript/TypeScript client for <a href="https://github.com/sepp-org/sepp">sepp</a>,</strong>
+    <br/>
+    a small, language-agnostic durable job queue.
+  </p>
 
-- **Producers** enqueue jobs with a [`SeppClient`](#producing) — one at a time, in best-effort batches, or atomic batches.
-- **Consumers** reserve jobs and report their outcome. The low-level `reserve` / `ack` / `nack` / `extend` calls give you full control, while the high-level [`Worker`](#consuming-with-a-worker) runs the whole reserve → process → ack loop for you with bounded concurrency, lease auto-extension, and graceful shutdown.
+  <p>
+    <a href="https://github.com/sepp-org/sepp-js/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/sepp-org/sepp-js/ci.yml?branch=main&labelColor=181512"></a>
+    <a href="https://www.npmjs.com/package/sepp-js"><img alt="npm" src="https://img.shields.io/npm/v/sepp-js?labelColor=181512"></a>
+    <a href="https://www.npmjs.com/package/sepp-js"><img alt="node versions" src="https://img.shields.io/node/v/sepp-js?labelColor=181512"></a>
+    <a href="LICENSE"><img alt="license" src="https://img.shields.io/npm/l/sepp-js?color=ec6a2e&labelColor=181512"></a>
+  </p>
 
-The client speaks gRPC over HTTP/2 (via [`@grpc/grpc-js`](https://www.npmjs.com/package/@grpc/grpc-js)), so it runs in **Node.js** and Node-compatible runtimes (Bun, Deno). It is async throughout; every call returns a `Promise`.
+  <p>
+    <a href="https://www.npmjs.com/package/sepp-js">npm</a>
+    ·
+    <a href="https://sepp-org.github.io/sepp/docs/">sepp docs</a>
+    ·
+    <a href="https://buf.build/sepp-org/sepp-proto/docs/main%3Asepp.v1">Protocol</a>
+    ·
+    <a href="https://github.com/sepp-org/sepp-js/issues">Issues</a>
+  </p>
+</div>
+
+## Functionality
+
+- **Producers** — enqueue jobs one at a time, in best-effort batches, or atomically. Supports idempotency keys, priorities, scheduled delivery and custom metadata.
+- **Consumers** — a high-level `Worker` runs the whole reserve → process → ack loop for you with bounded concurrency, automatic lease extension and graceful shutdown, or drop down to the raw `reserve` / `ack` / `nack` / `extend` calls for full control.
+- **Observability** — if `@opentelemetry/api` is installed and a tracer provider is registered, the client propagates W3C trace context from the producer's enqueue span to the worker's process span. With nothing installed, everything is a no-op.
+- **Typed errors** — every error extends `SeppError`, and deterministic server rejections (payload too large, unknown queue, …) are separate from transient transport errors, so retry logic stays simple.
+
+The client speaks gRPC over HTTP/2 (via
+[`@grpc/grpc-js`](https://www.npmjs.com/package/@grpc/grpc-js)), so it runs in
+**Node.js** and Node-compatible runtimes (Bun, Deno). It is async throughout;
+every call returns a `Promise`.
 
 ## Install
 
 ```sh
-npm install sepp
+npm install sepp-js
 ```
 
-Requires Node 18+. OpenTelemetry tracing is optional; install `@opentelemetry/api` alongside it to enable trace propagation.
+Requires Node 22+. OpenTelemetry tracing is optional; install `@opentelemetry/api` alongside it to enable trace propagation.
 
 ## Quickstart
 
+Enqueue a job, then run a worker that processes it (requires a running [sepp server](https://github.com/sepp-org/sepp)):
+
 ```ts
-import { SeppClient, Worker, Payload } from "sepp";
+import { SeppClient, Worker, Payload } from "sepp-js";
 
 const client = await SeppClient.connect("127.0.0.1:50051");
 
@@ -40,6 +75,10 @@ await new Worker(client, { queues: ["emails"], leaseDuration: 30_000 })
   })
   .run();
 ```
+
+Runnable versions live in [`examples/`](examples/), including
+[`traced.ts`](examples/traced.ts) which wires up an OTLP exporter for
+end-to-end distributed tracing.
 
 ## Concepts
 
@@ -63,7 +102,7 @@ const ack = await client.enqueue({
 });
 
 // Best-effort batch — one result per job, in order; narrow with isJobRejection.
-import { isJobRejection, describeJobRejection } from "sepp";
+import { isJobRejection, describeJobRejection } from "sepp-js";
 
 const results = await client.enqueueBatch([
   { queue: "emails", jobType: "send_welcome" },
@@ -84,7 +123,7 @@ const acks = await client.enqueueAtomic([
 ## Consuming with a Worker
 
 ```ts
-import { Worker, HandlerError } from "sepp";
+import { Worker, HandlerError } from "sepp-js";
 
 const worker = new Worker(client, {
   queues: ["emails"],
@@ -138,7 +177,7 @@ if (jobs) {
 ## Connection options
 
 ```ts
-import { SeppClient, RetryPolicy } from "sepp";
+import { SeppClient, RetryPolicy } from "sepp-js";
 
 const client = await SeppClient.connect("emails.internal:50051", {
   apiKey: process.env.SEPP_API_KEY, // sent as Authorization: Bearer <key>
@@ -217,3 +256,12 @@ npm run example    # run examples/main.ts against $SEPP_ADDR (default 127.0.0.1:
 ```
 
 Codegen pulls the contract straight from `buf.build/sepp-org/sepp-proto` (version pinned in `buf.gen.yaml`), and the generated stubs under `src/gen/` are committed, so installing the package needs no `buf`/`protoc`.
+
+## Docs
+
+This README is the client's usage documentation. For running and configuring
+the sepp server itself, see the [sepp docs site](https://sepp-org.github.io/sepp/docs/).
+
+## License
+
+sepp-js is licensed under the MIT License. See [LICENSE](LICENSE) for details.
