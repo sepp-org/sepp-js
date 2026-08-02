@@ -27,7 +27,7 @@ import type {
   GetServerInfoResponse,
   DeadLetterRecord as PbDeadLetterRecord,
 } from "../src/gen/sepp/v1/queue";
-import { DeadLetterCause } from "../src/gen/sepp/v1/queue";
+import { DeadLetterCause, QueueServiceClient } from "../src/gen/sepp/v1/queue";
 import { RetryPolicy } from "../src/retry";
 import { RetryDirective, TraceContext } from "../src/types";
 
@@ -311,6 +311,88 @@ describe("reserve", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Reserve cancellation
+// ---------------------------------------------------------------------------
+describe("reserve cancellation", () => {
+  /** A reserve stub that never responds until its call handle is cancelled. */
+  function cancellableReserve(): { rpc: FakeRpc; state: { cancelled: boolean } } {
+    const state = { cancelled: false };
+    const rpc = ((
+      _req: unknown,
+      _md: Metadata,
+      _opts: Partial<CallOptions>,
+      callback: (err: ServiceError | null, res?: unknown) => void,
+    ) => {
+      return {
+        cancel: () => {
+          state.cancelled = true;
+          callback(rpcError(GrpcStatus.CANCELLED, "Cancelled on client"));
+        },
+      } as unknown as ClientUnaryCall;
+    }) as unknown as FakeRpc;
+    return { rpc, state };
+  }
+
+  it("cancels the underlying call when the signal aborts", async () => {
+    const { rpc, state } = cancellableReserve();
+    const client = makeClient({ reserve: rpc });
+    const ac = new AbortController();
+    const pending = client.reserve({ queues: ["q"], leaseDuration: 30_000, signal: ac.signal });
+    ac.abort();
+    await expect(pending).rejects.toThrow(TransportError);
+    expect(state.cancelled).toBe(true);
+  });
+
+  it("cancels immediately when the signal is already aborted", async () => {
+    const { rpc, state } = cancellableReserve();
+    const client = makeClient({ reserve: rpc });
+    const ac = new AbortController();
+    ac.abort();
+    await expect(
+      client.reserve({ queues: ["q"], leaseDuration: 30_000, signal: ac.signal }),
+    ).rejects.toThrow(TransportError);
+    expect(state.cancelled).toBe(true);
+  });
+
+  it("re-cancels on a macrotask so a same-tick abort still resets the stream", async () => {
+    // Models the grpc-js race: a cancel issued in the same tick the call was
+    // created rejects the caller but does not reset the HTTP/2 stream, which
+    // only exists (and is only resettable) from the next macrotask on.
+    const state = { streamReset: false };
+    let streamEstablished = false;
+    const rpc = ((
+      _req: unknown,
+      _md: Metadata,
+      _opts: Partial<CallOptions>,
+      callback: (err: ServiceError | null, res?: unknown) => void,
+    ) => {
+      let rejected = false;
+      setImmediate(() => {
+        streamEstablished = true;
+      });
+      return {
+        cancel: () => {
+          if (!rejected) {
+            rejected = true;
+            callback(rpcError(GrpcStatus.CANCELLED, "Cancelled on client"));
+          }
+          if (streamEstablished) state.streamReset = true;
+        },
+      } as unknown as ClientUnaryCall;
+    }) as unknown as FakeRpc;
+
+    const client = makeClient({ reserve: rpc });
+    const ac = new AbortController();
+    const pending = client.reserve({ queues: ["q"], leaseDuration: 30_000, signal: ac.signal });
+    queueMicrotask(() => ac.abort());
+    await expect(pending).rejects.toThrow(TransportError);
+    // Give the follow-up cancel two macrotask turns to land.
+    await new Promise((r) => setImmediate(() => setImmediate(r)));
+    expect(state.streamReset).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Ack / Nack / Extend
 // ---------------------------------------------------------------------------
 describe("ack", () => {
@@ -437,7 +519,7 @@ describe("getServerInfo", () => {
     const client = makeClient({ getServerInfo: si });
     const info = await client.getServerInfo();
     expect(info.version).toBe("1.2.3");
-    expect(info.maxPayloadSize).toBe(1024);
+    expect(info.maxPayloadBytes).toBe(1024);
   });
 
   it("throws on malformed response", async () => {
@@ -555,6 +637,70 @@ describe("retry", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Enqueue retry duplication guard
+// ---------------------------------------------------------------------------
+describe("enqueue retry duplication guard", () => {
+  it("does not retry a keyless enqueue on DEADLINE_EXCEEDED", async () => {
+    const eb = createFakeRpc(undefined, undefined, [
+      rpcError(GrpcStatus.DEADLINE_EXCEEDED),
+      enqueueBatchResponse({ jobId: "abc" }),
+    ]);
+    const client = makeClient({ enqueueBatch: eb }, fastRetry(5));
+    await expect(client.enqueue({ queue: "q", jobType: "t" })).rejects.toThrow(TransportError);
+    expect(eb.calls).toBe(1);
+  });
+
+  it("retries a fully keyed enqueue on DEADLINE_EXCEEDED", async () => {
+    const eb = createFakeRpc(undefined, undefined, [
+      rpcError(GrpcStatus.DEADLINE_EXCEEDED),
+      enqueueBatchResponse({ jobId: "abc" }),
+    ]);
+    const client = makeClient({ enqueueBatch: eb }, fastRetry(5));
+    const ack = await client.enqueue({ queue: "q", jobType: "t", idempotencyKey: "idem" });
+    expect(ack.jobId).toBe("abc");
+    expect(eb.calls).toBe(2);
+  });
+
+  it("retries a keyless enqueue on UNAVAILABLE", async () => {
+    const eb = createFakeRpc(undefined, undefined, [
+      rpcError(GrpcStatus.UNAVAILABLE),
+      enqueueBatchResponse({ jobId: "abc" }),
+    ]);
+    const client = makeClient({ enqueueBatch: eb }, fastRetry(5));
+    const ack = await client.enqueue({ queue: "q", jobType: "t" });
+    expect(ack.jobId).toBe("abc");
+    expect(eb.calls).toBe(2);
+  });
+
+  it("does not retry when any job in the batch is keyless", async () => {
+    const eb = createFakeRpc(undefined, undefined, [
+      rpcError(GrpcStatus.DEADLINE_EXCEEDED),
+      { results: [] },
+    ]);
+    const client = makeClient({ enqueueBatch: eb }, fastRetry(5));
+    await expect(
+      client.enqueueBatch([
+        { queue: "q", jobType: "t", idempotencyKey: "idem" },
+        { queue: "q", jobType: "t" },
+      ]),
+    ).rejects.toThrow(TransportError);
+    expect(eb.calls).toBe(1);
+  });
+
+  it("does not retry a keyless atomic enqueue on ABORTED", async () => {
+    const ea = createFakeRpc(undefined, undefined, [
+      rpcError(GrpcStatus.ABORTED),
+      { success: { responses: [{ jobId: "a", deduplicated: false }] } },
+    ]);
+    const client = makeClient({ enqueueAtomic: ea }, fastRetry(5));
+    await expect(client.enqueueAtomic([{ queue: "q", jobType: "t" }])).rejects.toThrow(
+      TransportError,
+    );
+    expect(ea.calls).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Connect / builder
 // ---------------------------------------------------------------------------
 describe("SeppClient.connect", () => {
@@ -569,6 +715,18 @@ describe("SeppClient.connect", () => {
       InvalidApiKeyError,
     );
   });
+
+  it("closes the channel when the connection attempt fails", async () => {
+    const closeSpy = vi.spyOn(QueueServiceClient.prototype, "close");
+    try {
+      await expect(SeppClient.connect("localhost:1", { connectTimeout: 100 })).rejects.toThrow(
+        ConnectError,
+      );
+      expect(closeSpy).toHaveBeenCalled();
+    } finally {
+      closeSpy.mockRestore();
+    }
+  }, 10_000);
 });
 
 describe("SeppClient.fromClient", () => {
@@ -833,11 +991,18 @@ describe("ack with workerId", () => {
 // Nack with default values
 // ---------------------------------------------------------------------------
 describe("nack with default values", () => {
-  it("sends empty reason by default", async () => {
+  it("omits the reason by default", async () => {
     const nack = createFakeRpc({ jobId: "abc", deadLettered: false });
     const client = makeClient({ nack });
     await client.nack({ id: "abc", attempt: 1 });
-    expect(nack.lastRequest.reason).toBe("");
+    expect(nack.lastRequest.reason).toBeUndefined();
+  });
+
+  it("omits an empty reason", async () => {
+    const nack = createFakeRpc({ jobId: "abc", deadLettered: false });
+    const client = makeClient({ nack });
+    await client.nack({ id: "abc", attempt: 1 }, { reason: "" });
+    expect(nack.lastRequest.reason).toBeUndefined();
   });
 });
 

@@ -22,6 +22,13 @@ export interface RetryPolicyOptions {
   jitter?: boolean;
 }
 
+/**
+ * Backoff policy for retrying transient RPC failures. The default policy
+ * performs no retries; opt in by constructing one and passing it to
+ * {@link SeppClient.connect}. A retried enqueue can duplicate jobs that carry
+ * no idempotency key, so enqueue retries skip the ambiguous-commit codes
+ * (DEADLINE_EXCEEDED, ABORTED) unless every job in the request is keyed.
+ */
 export class RetryPolicy {
   readonly maxAttempts: number;
   readonly initialBackoff: number;
@@ -55,11 +62,16 @@ function statusCode(e: unknown): number | undefined {
 }
 
 /**
- * Runs `fn` until it succeeds, runs out of attempts, or hits a non-transient
+ * Runs `fn` until it succeeds, runs out of attempts, or hits a non-retryable
  * error, sleeping between attempts per `policy`. Rethrows the last raw error so
- * the caller can map it to a typed error.
+ * the caller can map it to a typed error. `isRetryable` decides which status
+ * codes are retried (default: every transient code).
  */
-export async function withRetry<T>(policy: RetryPolicy, fn: () => Promise<T>): Promise<T> {
+export async function withRetry<T>(
+  policy: RetryPolicy,
+  fn: () => Promise<T>,
+  isRetryable: (code: number) => boolean = isTransientStatus,
+): Promise<T> {
   let attempt = 1;
   let backoff = policy.initialBackoff;
   for (;;) {
@@ -67,7 +79,7 @@ export async function withRetry<T>(policy: RetryPolicy, fn: () => Promise<T>): P
       return await fn();
     } catch (e) {
       const code = statusCode(e);
-      const transient = code !== undefined && isTransientStatus(code);
+      const transient = code !== undefined && isRetryable(code);
       if (attempt >= policy.maxAttempts || !transient) throw e;
 
       const delay = policy.jitter ? backoff * jitterFactor() : backoff;

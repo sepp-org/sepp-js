@@ -34,11 +34,6 @@ async function roundtrip(): Promise<void> {
   const client = await SeppClient.connect(ADDR);
   const tracer = trace.getTracer("sepp-js-example");
 
-  let resolveDone: (id: string) => void;
-  const done = new Promise<string>((resolve) => {
-    resolveDone = resolve;
-  });
-
   // 1. Enqueue inside a producer span. The active context is stamped onto the
   //    job automatically, so the worker's process span can link back to it.
   const publishSpan = tracer.startSpan("app.publish", { kind: SpanKind.PRODUCER });
@@ -53,30 +48,28 @@ async function roundtrip(): Promise<void> {
   publishSpan.end();
 
   // 2. Run a worker. It opens a `sepp.process` span linked to the producer.
-  const worker = new Worker(client, { queues: [QUEUE], leaseDuration: 30_000 }).handle(
-    JOB_TYPE,
-    async (payload, ctx) => {
-      console.log(`handling job ${ctx.id}: ${JSON.stringify(payload?.text() ?? "")}`);
-      resolveDone(ctx.id);
-    },
-  );
-
+  //    This example expects exactly one job, so the handler triggers graceful
+  //    shutdown itself; a long-running service would wire it to SIGTERM.
+  const worker = new Worker(client, { queues: [QUEUE], leaseDuration: 30_000 });
   const handle = worker.shutdownHandle();
-  const running = worker.run();
 
-  const id = await Promise.race([
-    done,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("timed out waiting for the job")), 15_000),
-    ),
-  ]);
+  let processed: string | undefined;
+  worker.handle(JOB_TYPE, async (payload, ctx) => {
+    console.log(`handling job ${ctx.id}: ${JSON.stringify(payload?.text() ?? "")}`);
+    processed = ctx.id;
+    handle.shutdown();
+  });
 
-  await new Promise((r) => setTimeout(r, 500));
-  handle.shutdown();
-  await running;
+  // Give up if the job never arrives (e.g. another consumer grabbed it).
+  const guard = setTimeout(() => handle.shutdown(), 15_000);
+
+  // Shutdown drains in-flight jobs (including their acks) before run() resolves.
+  await worker.run();
+  clearTimeout(guard);
   client.close();
 
-  console.log(`roundtrip OK — job ${id} processed; see the linked spans printed above`);
+  if (!processed) throw new Error("timed out waiting for the job");
+  console.log(`roundtrip OK — job ${processed} processed; see the linked spans printed above`);
 }
 
 async function main(): Promise<void> {

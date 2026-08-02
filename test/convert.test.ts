@@ -238,6 +238,23 @@ describe("jobFromPb", () => {
     expect(job.ctx.traceContext?.traceparent).toBe(VALID_TP);
     expect(job.ctx.traceContext?.tracestate).toBe("v=1");
   });
+
+  it("maps scheduledAt when set and leaves it undefined when absent", () => {
+    const scheduled = jobFromPb(
+      noopExtend,
+      { ...validPbJob(), scheduledAt: new Date(1_700_000_030_000) },
+      undefined,
+    );
+    expect(scheduled.ctx.scheduledAt).toEqual(new Date(1_700_000_030_000));
+
+    const immediate = jobFromPb(noopExtend, validPbJob(), undefined);
+    expect(immediate.ctx.scheduledAt).toBeUndefined();
+  });
+
+  it("maps maxAttempts", () => {
+    const job = jobFromPb(noopExtend, validPbJob(), undefined);
+    expect(job.ctx.maxAttempts).toBe(5);
+  });
 });
 
 describe("serverInfoFromPb", () => {
@@ -269,7 +286,7 @@ describe("serverInfoFromPb", () => {
   it("maps the happy path", () => {
     const info = serverInfoFromPb(validInfo());
     expect(info.version).toBe("1.2.3");
-    expect(info.maxPayloadSize).toBe(1024);
+    expect(info.maxPayloadBytes).toBe(1024);
     expect(info.maxScheduleHorizon).toBe(86_400_000);
     expect(info.maxWaitTimeout).toBe(30_000);
     expect(info.strictQueues).toBe(true);
@@ -304,7 +321,31 @@ describe("deadLetterRecordFromPb", () => {
     expect(replay.queue).toBe("emails");
     expect(replay.jobType).toBe("send_email");
     expect(replay.priority).toBe(3);
+    expect(replay.maxAttempts).toBe(5);
     expect(Array.from(replay.payload?.data ?? [])).toEqual([1, 2, 3]);
+  });
+
+  it("maps maxAttempts and scheduledAt from the embedded job", () => {
+    const r = deadLetterRecordFromPb({
+      job: { ...validPbJob(), scheduledAt: new Date(1_700_000_030_000) },
+      cause: DeadLetterCause.DEAD_LETTER_CAUSE_ATTEMPTS_EXHAUSTED,
+      failedAt: new Date(1_700_000_100_000),
+      finalAttempt: 5,
+    });
+    expect(r.maxAttempts).toBe(5);
+    expect(r.scheduledAt).toEqual(new Date(1_700_000_030_000));
+  });
+
+  it("does not re-schedule on replay", () => {
+    const r = deadLetterRecordFromPb({
+      job: { ...validPbJob(), scheduledAt: new Date(1_700_000_030_000) },
+      cause: DeadLetterCause.DEAD_LETTER_CAUSE_ATTEMPTS_EXHAUSTED,
+      failedAt: new Date(1_700_000_100_000),
+      finalAttempt: 5,
+    });
+    const replay = r.toEnqueueRequest();
+    expect(replay.maxAttempts).toBe(5);
+    expect(replay.scheduledAt).toBeUndefined();
   });
 
   it("maps the admin cause", () => {

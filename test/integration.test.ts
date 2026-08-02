@@ -1,6 +1,9 @@
 /**
  * End-to-end tests against a real sepp server started via testcontainers.
- * When Docker is unavailable the tests skip gracefully.
+ * When no server can be provided the suite fails loudly — it never skips, so
+ * a missing container runtime cannot green-light a run that tested nothing.
+ * Set SEPP_TEST_ADDR (host:port) to use an already-running server instead of
+ * a container; the tests then share that server and its state.
  */
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -12,24 +15,27 @@ const QUEUE = "sepp-js-it";
 const VALID_TP = "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01";
 
 let container: StartedTestContainer | undefined;
-let endpoint: string | undefined;
+let endpoint: string;
 let client: SeppClient;
 
 beforeAll(async () => {
-  try {
-    container = await new GenericContainer("ghcr.io/sepp-org/sepp:master")
-      .withExposedPorts(50051)
-      .withEnvironment({ SEPP_ALLOW_QUEUE_CREATION: "true" })
-      .withWaitStrategy(Wait.forLogMessage("queue server listening"))
-      .withStartupTimeout(60000)
-      .start();
-  } catch (err) {
-    console.warn(`integration: could not start sepp container (${err}); skipping tests`);
-    return;
+  if (process.env.SEPP_TEST_ADDR) {
+    endpoint = process.env.SEPP_TEST_ADDR;
+  } else {
+    try {
+      container = await new GenericContainer("ghcr.io/sepp-org/sepp:latest")
+        .withExposedPorts(50051)
+        .withWaitStrategy(Wait.forLogMessage("queue server listening"))
+        .withStartupTimeout(60000)
+        .start();
+    } catch (err) {
+      throw new Error(
+        `integration: could not start the sepp container (is a container runtime available?); ` +
+          `set SEPP_TEST_ADDR to use an already-running server instead: ${err}`,
+      );
+    }
+    endpoint = `localhost:${container.getMappedPort(50051)}`;
   }
-
-  const port = container.getMappedPort(50051);
-  endpoint = `localhost:${port}`;
 
   client = await SeppClient.connect(endpoint);
 }, 120_000);
@@ -51,14 +57,12 @@ async function reserve(extra: Record<string, unknown> = {}) {
 
 describe("integration", () => {
   it("reports server info", async () => {
-    if (!endpoint) return;
     const info = await client.getServerInfo();
     expect(info.version.length).toBeGreaterThan(0);
     expect(info.maxEnqueueBatch).toBeGreaterThan(0);
   });
 
   it("enqueues, reserves, and acks a job", async () => {
-    if (!endpoint) return;
     const jobType = `it-${Date.now()}`;
     const ack = await client.enqueue({
       queue: QUEUE,
@@ -78,7 +82,6 @@ describe("integration", () => {
   });
 
   it("enqueue with idempotency deduplicates", async () => {
-    if (!endpoint) return;
     const jobType = `it-idem-${Date.now()}`;
     const idemKey = `key-${Date.now()}`;
 
@@ -100,7 +103,6 @@ describe("integration", () => {
   });
 
   it("nack retry and reserve again with incremented attempt", async () => {
-    if (!endpoint) return;
     const jobType = `it-nack-retry-${Date.now()}`;
     await client.enqueue({ queue: QUEUE, jobType, payload: Payload.text("retry") });
 
@@ -120,7 +122,6 @@ describe("integration", () => {
   });
 
   it("nack dead letter removes the job", async () => {
-    if (!endpoint) return;
     const jobType = `it-dl-${Date.now()}`;
     await client.enqueue({ queue: QUEUE, jobType, payload: Payload.text("dl") });
 
@@ -136,7 +137,6 @@ describe("integration", () => {
   });
 
   it("extend lease returns a new expiry", async () => {
-    if (!endpoint) return;
     const jobType = `it-extend-${Date.now()}`;
     await client.enqueue({ queue: QUEUE, jobType, payload: Payload.text("extend") });
 
@@ -152,7 +152,6 @@ describe("integration", () => {
   });
 
   it("trace context propagates through enqueue and reserve", async () => {
-    if (!endpoint) return;
     const jobType = `it-trace-${Date.now()}`;
     const tc = TraceContext.create(VALID_TP, "v=1");
 
@@ -173,7 +172,6 @@ describe("integration", () => {
   });
 
   it("worker processes job through handler", async () => {
-    if (!endpoint) return;
     const jobType = `it-worker-${Date.now()}`;
     await client.enqueue({ queue: QUEUE, jobType, payload: Payload.text("ping") });
 
@@ -208,7 +206,6 @@ describe("integration", () => {
   }, 20_000);
 
   it("worker handler error nacks the job", async () => {
-    if (!endpoint) return;
     const jobType = `it-worker-err-${Date.now()}`;
     await client.enqueue({ queue: QUEUE, jobType, payload: Payload.text("fail") });
 
@@ -250,7 +247,6 @@ describe("integration", () => {
   }, 20_000);
 
   it("worker catch-all handles unregistered job type", async () => {
-    if (!endpoint) return;
     const jobType = `it-catchall-${Date.now()}`;
     await client.enqueue({ queue: QUEUE, jobType, payload: Payload.text("catchall") });
 
@@ -292,14 +288,12 @@ describe("integration", () => {
   }, 20_000);
 
   it("worker duplicate handler throws", async () => {
-    if (!endpoint) return;
     const worker = new Worker(client, { queues: [QUEUE], leaseDuration: 30_000 });
     worker.handle("t", async () => {});
     expect(() => worker.handle("t", async () => {})).toThrow();
   });
 
   it("worker auto-extend keeps lease alive for long handler", async () => {
-    if (!endpoint) return;
     const jobType = `it-autoextend-${Date.now()}`;
     await client.enqueue({ queue: QUEUE, jobType, payload: Payload.text("long") });
 
@@ -342,7 +336,6 @@ describe("integration", () => {
   }, 25_000);
 
   it("worker processing with maxInFlight bounds concurrency", async () => {
-    if (!endpoint) return;
     const jobType = `it-concurrent-${Date.now()}`;
     for (let i = 0; i < 5; i++) {
       await client.enqueue({ queue: QUEUE, jobType, payload: Payload.text(`job${i}`) });
@@ -392,7 +385,6 @@ describe("integration", () => {
   }, 30_000);
 
   it("reserve returns null on empty queue", async () => {
-    if (!endpoint) return;
     const empty = await client.reserve({
       queues: [`empty-${Date.now()}`],
       leaseDuration: 1_000,

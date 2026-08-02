@@ -1,6 +1,7 @@
+import { status as GrpcStatus } from "@grpc/grpc-js";
 import { describe, expect, it } from "vitest";
 
-import type { SeppClient } from "../src/client";
+import { SeppClient } from "../src/client";
 import {
   AttemptMismatchError,
   DuplicateHandlerError,
@@ -189,7 +190,7 @@ describe("dispatch outcomes", () => {
       waitUntil(() => done),
     );
     expect(client.nacked).toHaveLength(1);
-    expect(client.nacked[0]!.reason).toBe("handler threw an error");
+    expect(client.nacked[0]!.reason).toBe("handler threw: Error: boom");
   });
 
   it("no handler nacks the job", async () => {
@@ -201,13 +202,10 @@ describe("dispatch outcomes", () => {
     });
 
     worker.handle("something_else", async () => {});
-    const running = worker.run();
-    await sleep(300);
-    worker.shutdownHandle().shutdown();
-    await Promise.race([
-      running,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 2000)),
-    ]);
+    await driveWorker(
+      worker,
+      waitUntil(() => client.nacked.length === 1),
+    );
     expect(client.nacked).toHaveLength(1);
   });
 
@@ -281,16 +279,18 @@ describe("graceful shutdown", () => {
       leaseDuration: 30_000,
     });
 
+    let started = false;
     let release = () => {};
     const blocked = new Promise<void>((resolve) => {
       release = resolve;
     });
     worker.handle("t", async () => {
+      started = true;
       await blocked;
     });
 
     const running = worker.run();
-    await sleep(100);
+    await waitUntil(() => started);
     worker.shutdownHandle().shutdown();
 
     let resolved = false;
@@ -306,6 +306,42 @@ describe("graceful shutdown", () => {
       new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 2000)),
     ]);
     expect(client.acked).toHaveLength(1);
+  });
+
+  it("cancels an in-flight long-poll reserve and resolves promptly", async () => {
+    // A real SeppClient over a stubbed gRPC method: the reserve never responds
+    // until its call handle is cancelled, like a genuine 30s long poll.
+    let cancelled = false;
+    const reserve = (
+      _req: unknown,
+      _md: unknown,
+      _opts: unknown,
+      cb: (err: (Error & { code: number }) | null, res?: unknown) => void,
+    ) => {
+      const timer = setTimeout(() => cb(null, { jobs: [] }), 30_000);
+      return {
+        cancel: () => {
+          cancelled = true;
+          clearTimeout(timer);
+          const err = new Error("Cancelled on client") as Error & { code: number };
+          err.code = GrpcStatus.CANCELLED;
+          cb(err);
+        },
+      };
+    };
+    const client = SeppClient.fromClient({ reserve, close: () => {} } as any);
+    const worker = new Worker(client, { queues: ["q"], leaseDuration: 30_000 });
+
+    const running = worker.run();
+    await sleep(50); // let run() block inside the long-poll reserve
+    const start = Date.now();
+    worker.shutdownHandle().shutdown();
+    await Promise.race([
+      running,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 2000)),
+    ]);
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(cancelled).toBe(true);
   });
 });
 
@@ -346,8 +382,10 @@ describe("auto-extend", () => {
     });
 
     let done = false;
-    worker.handle("t", async () => {
+    let signalAborted = false;
+    worker.handle("t", async (_payload, ctx) => {
       await sleep(200);
+      signalAborted = ctx.signal?.aborted === true;
       done = true;
     });
     await driveWorker(
@@ -356,6 +394,7 @@ describe("auto-extend", () => {
     );
     expect(client.acked).toHaveLength(0);
     expect(client.nacked).toHaveLength(0);
+    expect(signalAborted).toBe(true);
   });
 
   it("aborts handler on lease lost via JobNotFoundError", async () => {
@@ -378,6 +417,91 @@ describe("auto-extend", () => {
       waitUntil(() => done),
     );
     expect(client.acked).toHaveLength(0);
+  });
+
+  it("default heartbeat interval tracks the granted (server-clamped) lease", async () => {
+    const client = new FakeClient();
+    // The server grants ~60ms per extension no matter what lease was requested.
+    client._extend = (_jobId, _attempt, _extensionMs, _workerId) => {
+      client.extends++;
+      return Promise.resolve(new Date(Date.now() + 60));
+    };
+    client.batches = [[makeJob(client, "t", { leaseExpiresAt: new Date(Date.now() + 60) })]];
+    const worker = new Worker(client as unknown as SeppClient, {
+      queues: ["q"],
+      leaseDuration: 30_000, // requested/3 would be 10s and never fire during the handler
+      autoExtend: true,
+    });
+
+    let done = false;
+    worker.handle("t", async () => {
+      await sleep(150);
+      done = true;
+    });
+    await driveWorker(
+      worker,
+      waitUntil(() => done),
+    );
+    // Cadence follows the granted lease: ~every 20ms, so several extends fired.
+    expect(client.extends).toBeGreaterThanOrEqual(2);
+    expect(client.acked).toHaveLength(1);
+  });
+
+  it("retries after a transient extend failure while the lease is still valid", async () => {
+    const client = new FakeClient();
+    let first = true;
+    client._extend = (_jobId, _attempt, extensionMs, _workerId) => {
+      client.extends++;
+      if (first) {
+        first = false;
+        return Promise.reject(new Error("transient blip"));
+      }
+      return Promise.resolve(new Date(Date.now() + extensionMs));
+    };
+    client.batches = [[makeJob(client, "t", { leaseExpiresAt: new Date(Date.now() + 60_000) })]];
+    const worker = new Worker(client as unknown as SeppClient, {
+      queues: ["q"],
+      leaseDuration: 30_000,
+      autoExtendInterval: 10,
+    });
+
+    let done = false;
+    worker.handle("t", async () => {
+      await sleep(60);
+      done = true;
+    });
+    await driveWorker(
+      worker,
+      waitUntil(() => done),
+    );
+    expect(client.extends).toBeGreaterThanOrEqual(2); // failed once, then kept extending
+    expect(client.acked).toHaveLength(1); // the transient failure did not lose the lease
+  });
+
+  it("marks the lease lost when extend fails past expiry", async () => {
+    const client = new FakeClient();
+    client.extendError = new Error("storage down"); // transient, but the lease has lapsed
+    client.batches = [[makeJob(client, "t", { leaseExpiresAt: new Date(Date.now() + 30) })]];
+    const worker = new Worker(client as unknown as SeppClient, {
+      queues: ["q"],
+      leaseDuration: 60,
+      autoExtendInterval: 50, // first extend attempt lands after the 30ms lease expired
+    });
+
+    let done = false;
+    let signalAborted = false;
+    worker.handle("t", async (_payload, ctx) => {
+      await sleep(150);
+      signalAborted = ctx.signal?.aborted === true;
+      done = true;
+    });
+    await driveWorker(
+      worker,
+      waitUntil(() => done),
+    );
+    expect(client.acked).toHaveLength(0);
+    expect(client.nacked).toHaveLength(0);
+    expect(signalAborted).toBe(true);
   });
 });
 
@@ -423,51 +547,94 @@ describe("reserve error handling", () => {
 describe("max in flight", () => {
   it("bounds concurrent handler execution", async () => {
     const client = new FakeClient();
-    const jobs = [makeJob(client, "t", { id: "a" }), makeJob(client, "t", { id: "b" })];
-    client.batches = [null, jobs];
+    // More jobs than permits, delivered in one oversized batch, so
+    // over-admission would be observable.
+    const jobs = Array.from({ length: 6 }, (_, i) => makeJob(client, "t", { id: `job-${i}` }));
+    client.batches = [jobs];
+    const reserveMaxJobs: Array<number | undefined> = [];
+    const origReserve = client.reserve.bind(client);
+    client.reserve = async (opts) => {
+      reserveMaxJobs.push(opts.maxJobs);
+      return origReserve(opts);
+    };
 
     let concurrent = 0;
     let maxConcurrent = 0;
-    const running = new Set<number>();
-    const releases: Array<() => void> = [];
-    const doneCount = { v: 0 };
+    let completed = 0;
 
     const worker = new Worker(client as unknown as SeppClient, {
       queues: ["q"],
       leaseDuration: 30_000,
       maxInFlight: 2,
-      reserveErrorBackoff: 1,
     });
 
     worker.handle("t", async () => {
-      const id = running.size;
-      running.add(id);
-      concurrent = running.size;
+      concurrent++;
       maxConcurrent = Math.max(maxConcurrent, concurrent);
-
-      let release: () => void;
-      const p = new Promise<void>((r) => {
-        release = r;
-      });
-      releases.push(release!);
-      await p;
-
-      running.delete(id);
-      concurrent = running.size;
-      doneCount.v++;
+      await sleep(30);
+      concurrent--;
+      completed++;
     });
 
-    const runningP = worker.run();
-    await sleep(300);
-    expect(doneCount.v).toBe(0);
-    for (const r of releases) r();
-    await sleep(100);
-    worker.shutdownHandle().shutdown();
-    await Promise.race([
-      runningP,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 2000)),
-    ]);
+    await driveWorker(
+      worker,
+      waitUntil(() => completed === 6),
+    );
+    expect(completed).toBe(6);
     expect(maxConcurrent).toBeGreaterThanOrEqual(1);
+    expect(maxConcurrent).toBeLessThanOrEqual(2);
+    // The worker never asks for more jobs than it has free capacity for.
+    expect(reserveMaxJobs[0]).toBe(2);
+    for (const m of reserveMaxJobs) expect(m).toBeLessThanOrEqual(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Early-empty reserve backoff
+// ---------------------------------------------------------------------------
+describe("early-empty reserve backoff", () => {
+  it("pauses between reserves when the server answers empty immediately", async () => {
+    const client = new FakeClient();
+    let calls = 0;
+    client.reserve = async () => {
+      calls++;
+      return null; // returns instantly, long before the 30s wait window
+    };
+    const worker = new Worker(client as unknown as SeppClient, {
+      queues: ["q"],
+      leaseDuration: 30_000,
+    });
+
+    const running = worker.run();
+    await sleep(600);
+    worker.shutdownHandle().shutdown();
+    await running;
+    // ~250ms pause between early empties, not a hot loop.
+    expect(calls).toBeGreaterThanOrEqual(1);
+    expect(calls).toBeLessThanOrEqual(5);
+  });
+
+  it("re-polls immediately after a full-window empty reserve", async () => {
+    const client = new FakeClient();
+    let calls = 0;
+    client.reserve = async () => {
+      calls++;
+      await sleep(120); // the full wait window elapses server-side
+      return null;
+    };
+    const worker = new Worker(client as unknown as SeppClient, {
+      queues: ["q"],
+      leaseDuration: 30_000,
+      waitTimeout: 120,
+    });
+
+    const running = worker.run();
+    await sleep(600);
+    worker.shutdownHandle().shutdown();
+    await running;
+    // ~120ms per poll with no extra backoff; a spurious 250ms pause would
+    // allow at most 2 polls in this window.
+    expect(calls).toBeGreaterThanOrEqual(3);
   });
 });
 
@@ -541,6 +708,42 @@ describe("Worker validation", () => {
     const client = new FakeClient();
     expect(
       () => new Worker(client as unknown as SeppClient, { queues: ["q"], leaseDuration: -1 }),
+    ).toThrow(ValidationError);
+  });
+
+  it("rejects zero waitTimeout", () => {
+    const client = new FakeClient();
+    expect(
+      () =>
+        new Worker(client as unknown as SeppClient, {
+          queues: ["q"],
+          leaseDuration: 30_000,
+          waitTimeout: 0,
+        }),
+    ).toThrow(ValidationError);
+  });
+
+  it("rejects negative waitTimeout", () => {
+    const client = new FakeClient();
+    expect(
+      () =>
+        new Worker(client as unknown as SeppClient, {
+          queues: ["q"],
+          leaseDuration: 30_000,
+          waitTimeout: -1,
+        }),
+    ).toThrow(ValidationError);
+  });
+
+  it("rejects non-positive reserveErrorBackoff", () => {
+    const client = new FakeClient();
+    expect(
+      () =>
+        new Worker(client as unknown as SeppClient, {
+          queues: ["q"],
+          leaseDuration: 30_000,
+          reserveErrorBackoff: 0,
+        }),
     ).toThrow(ValidationError);
   });
 

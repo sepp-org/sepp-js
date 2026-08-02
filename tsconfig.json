@@ -1,5 +1,8 @@
 {
   "compilerOptions": {
+    // tsup's dts build injects a baseUrl, which TypeScript 6 hard-errors on
+    // without this escape hatch.
+    "ignoreDeprecations": "6.0",
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",

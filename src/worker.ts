@@ -25,6 +25,15 @@ import { type Job, type JobCtx, type Payload, type ReserveOptions, RetryDirectiv
 /** A job handler: resolves to ack the job, throws {@link HandlerError} (or anything) to nack it. */
 export type Handler = (payload: Payload | undefined, ctx: JobCtx) => Promise<void>;
 
+/** An empty reserve returning sooner than this is treated as an early empty. */
+const EARLY_EMPTY_THRESHOLD_MS = 100;
+
+/** Pause after an early-empty reserve, so a server answering empty immediately is not hammered. */
+const EARLY_EMPTY_BACKOFF_MS = 250;
+
+/** Nack reasons are truncated to this many characters (server-side value size limits). */
+const NACK_REASON_MAX_CHARS = 512;
+
 /**
  * Thrown from a handler to nack its job, choosing how the server should retry.
  * Use the static constructors rather than `new`.
@@ -60,15 +69,20 @@ export interface WorkerOptions {
   queues: string[];
   /** Lease duration for reserved jobs, in milliseconds. */
   leaseDuration: number;
-  /** Long-poll wait timeout per reserve, in ms. Default 30_000. */
+  /** Long-poll wait timeout per reserve, in ms (must be positive). Default 30_000. */
   waitTimeout?: number;
   /** Cap on jobs returned per reserve (the worker also limits to free capacity). */
   maxJobs?: number;
   /** Maximum jobs processed concurrently. Default 16. */
   maxInFlight?: number;
-  /** Wait after a failed reserve before retrying, in ms. Default 1000. */
+  /** Wait after a failed reserve before retrying, in ms (must be positive). Default 1000. */
   reserveErrorBackoff?: number;
-  /** Extend leases automatically while a handler runs (heartbeat = lease/3 by default). */
+  /**
+   * Extend leases automatically while a handler runs (heartbeat = lease/3 by
+   * default). Use with caution: a handler that hangs indefinitely keeps its
+   * lease alive forever, so its job is never redelivered. Bound hang-prone
+   * work yourself, e.g. with `AbortSignal.timeout`.
+   */
   autoExtend?: boolean;
   /** Explicit auto-extend heartbeat interval, in ms (implies `autoExtend`). */
   autoExtendInterval?: number;
@@ -82,7 +96,12 @@ export interface WorkerOptions {
 export class ShutdownHandle {
   readonly #ac = new AbortController();
 
-  /** Signals the worker to stop reserving new jobs and begin draining. */
+  /**
+   * Signals the worker to stop reserving new jobs and begin draining. An
+   * in-flight reserve long-poll is cancelled; if it completes with jobs at the
+   * shutdown boundary anyway, those jobs are still processed (and acked or
+   * nacked) before {@link Worker.run} returns.
+   */
   shutdown(): void {
     this.#ac.abort();
   }
@@ -102,6 +121,11 @@ type Disposition =
   | { kind: "handlerError"; error: HandlerError }
   | { kind: "thrown"; error: unknown };
 
+/**
+ * A high-level worker that runs the reserve → process → ack/nack loop over a
+ * {@link SeppClient}, with bounded concurrency, optional lease auto-extension,
+ * and graceful shutdown via a {@link ShutdownHandle}.
+ */
 export class Worker {
   readonly #client: SeppClient;
   readonly #queues: string[];
@@ -124,6 +148,10 @@ export class Worker {
       if (q.length === 0) throw new ValidationError(`queue name at index ${i} must not be empty`);
     });
     if (opts.leaseDuration <= 0) throw new ValidationError("leaseDuration must be at least 1ms");
+    if (opts.waitTimeout !== undefined && opts.waitTimeout <= 0)
+      throw new ValidationError("waitTimeout must be at least 1ms");
+    if (opts.reserveErrorBackoff !== undefined && opts.reserveErrorBackoff <= 0)
+      throw new ValidationError("reserveErrorBackoff must be at least 1ms");
     if (opts.maxJobs !== undefined && opts.maxJobs < 1)
       throw new ValidationError("maxJobs must be at least 1");
     if (opts.workerId !== undefined && opts.workerId.length === 0) {
@@ -180,6 +208,11 @@ export class Worker {
    * Runs the reserve → process → ack/nack loop until shutdown is signalled and
    * all in-flight jobs have drained. Reserve errors are logged and retried; they
    * do not stop the loop.
+   *
+   * The drain wait is unbounded: a handler that never settles blocks the return
+   * of `run()` indefinitely (and with `autoExtend` its lease is kept alive the
+   * whole time). If a handler's work can hang, bound it yourself, e.g. with
+   * `AbortSignal.timeout`.
    */
   async run(): Promise<void> {
     await loadOtel();
@@ -210,24 +243,37 @@ export class Worker {
         leaseDuration: this.#leaseDuration,
         waitTimeout: this.#waitTimeout,
         workerId: this.#workerId,
+        signal: this.#shutdown.signal, // cancels the long-poll when shutdown fires
       };
       const capacity = 1 + sem.available;
       reserveOpts.maxJobs =
         this.#maxJobs !== undefined ? Math.min(this.#maxJobs, capacity) : capacity;
 
       let jobs: Job[] | null;
+      const reserveStart = Date.now();
       try {
         jobs = await this.#client.reserve(reserveOpts);
       } catch (err) {
-        this.#logger.warn("reserve error; backing off", { error: String(err) });
         sem.release();
+        // A failure after shutdown was signalled is expected (our own
+        // cancellation of the long-poll) — exit the loop cleanly.
         if (this.#shutdown.isShutdown) break;
+        this.#logger.warn("reserve error; backing off", { error: String(err) });
         await sleepUntil(this.#reserveErrorBackoff, this.#shutdown.signal);
         continue;
       }
 
       if (!jobs) {
-        sem.release(); // wait window elapsed — re-poll immediately
+        sem.release();
+        // An empty reserve that answered well before the wait window elapsed
+        // (e.g. a server draining at shutdown) would otherwise be hammered;
+        // normal long-poll empties re-poll immediately. Capped at half the
+        // wait window so a deliberately tiny waitTimeout is not misread as
+        // early.
+        const earlyMs = Math.min(EARLY_EMPTY_THRESHOLD_MS, (this.#waitTimeout ?? 30_000) / 2);
+        if (Date.now() - reserveStart < earlyMs) {
+          await sleepUntil(EARLY_EMPTY_BACKOFF_MS, this.#shutdown.signal);
+        }
         continue;
       }
 
@@ -348,7 +394,10 @@ export class Worker {
     }
     // A thrown non-HandlerError is the analog of the Rust handler panic.
     this.#logger.error("handler threw; nacking", { error: String(d.error) });
-    await this.#client.nack(ctx, { reason: "handler threw an error" });
+    // Keep the root cause in the nack reason: it ends up in the server-side
+    // dead-letter record's last_reason.
+    const reason = `handler threw: ${String(d.error)}`.slice(0, NACK_REASON_MAX_CHARS);
+    await this.#client.nack(ctx, { reason });
   }
 
   async #heartbeat(ctx: JobCtx, hbStop: AbortSignal): Promise<void> {

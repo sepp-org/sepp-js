@@ -6,7 +6,8 @@ import { currentTraceContext, getOtel, validateTraceparent } from "./trace";
  *
  * The queue never interprets `data`; it only carries the bytes. `encoding`
  * (e.g. `"application/json"`) is a hint the producer sets and the worker reads
- * to decide how to deserialize.
+ * to decide how to deserialize. The wire contract requires `data` to be
+ * non-empty — omit the payload entirely for jobs that carry no data.
  */
 export class Payload {
   constructor(
@@ -222,6 +223,8 @@ export interface ReserveOptions {
   workerId?: string;
   /** Maximum jobs to return in one response (default 1). The server clamps to its max. */
   maxJobs?: number;
+  /** Cancels the in-flight reserve when aborted; the call fails with a {@link TransportError}. */
+  signal?: AbortSignal;
 }
 
 /** @internal Extends a lease and returns the new expiry. Wired up by the client. */
@@ -241,6 +244,7 @@ export interface JobCtxInit {
   attempt: number;
   maxAttempts: number;
   enqueuedAt: Date;
+  scheduledAt?: Date;
   custom: Record<string, Primitive>;
   traceContext?: TraceContext;
   leaseExpiresAt: Date;
@@ -269,6 +273,8 @@ export class JobCtx {
   readonly maxAttempts: number;
   /** When the producer enqueued the job. */
   readonly enqueuedAt: Date;
+  /** When the job was scheduled to become available, if it was enqueued with a delay. */
+  readonly scheduledAt?: Date;
   /** Custom metadata the producer attached. */
   readonly custom: Record<string, Primitive>;
   /** The producer's trace context, if any and if it was well-formed. */
@@ -291,6 +297,7 @@ export class JobCtx {
     this.attempt = init.attempt;
     this.maxAttempts = init.maxAttempts;
     this.enqueuedAt = init.enqueuedAt;
+    this.scheduledAt = init.scheduledAt;
     this.custom = init.custom;
     this.traceContext = init.traceContext;
     this.workerId = init.workerId;
@@ -353,7 +360,7 @@ export class RetryDirective {
     return new RetryDirective("after", Math.max(0, delayMs));
   }
 
-  /** Do not retry; send the job straight to the dead-letter queue. */
+  /** Do not retry; send the job straight to the dead-letter store. */
   static deadLetter(): RetryDirective {
     return new RetryDirective("dead_letter");
   }
@@ -366,7 +373,7 @@ export interface ServerInfo {
   serverTime: Date;
   restrictsEncodings: boolean;
   allowedEncodings: string[];
-  maxPayloadSize: number;
+  maxPayloadBytes: number;
   maxCustomEntries: number;
   maxCustomTotalBytes: number;
   maxCustomKeyBytes: number;
@@ -400,9 +407,11 @@ export type DeadLetterCause =
   jobType: string;
   payload?: Payload;
   priority: number;
+  maxAttempts: number;
   custom: Record<string, Primitive>;
   traceContext?: TraceContext;
   enqueuedAt: Date;
+  scheduledAt?: Date;
   cause: DeadLetterCause;
   failedAt: Date;
   finalAttempt: number;
@@ -420,9 +429,11 @@ export class DeadLetterRecord {
   readonly jobType: string;
   readonly payload?: Payload;
   readonly priority: number;
+  readonly maxAttempts: number;
   readonly custom: Record<string, Primitive>;
   readonly traceContext?: TraceContext;
   readonly enqueuedAt: Date;
+  readonly scheduledAt?: Date;
   readonly cause: DeadLetterCause;
   readonly failedAt: Date;
   readonly finalAttempt: number;
@@ -434,9 +445,11 @@ export class DeadLetterRecord {
     this.jobType = init.jobType;
     this.payload = init.payload;
     this.priority = init.priority;
+    this.maxAttempts = init.maxAttempts;
     this.custom = init.custom;
     this.traceContext = init.traceContext;
     this.enqueuedAt = init.enqueuedAt;
+    this.scheduledAt = init.scheduledAt;
     this.cause = init.cause;
     this.failedAt = init.failedAt;
     this.finalAttempt = init.finalAttempt;
@@ -445,8 +458,10 @@ export class DeadLetterRecord {
 
   /**
    * Builds an {@link EnqueueRequest} that replays this job into its original
-   * queue, preserving payload, priority, custom metadata, and trace context.
-   * The replay is a fresh job — the server assigns a new id and resets attempts.
+   * queue, preserving payload, priority, maxAttempts, custom metadata, and
+   * trace context. The replay is a fresh job — the server assigns a new id and
+   * resets attempts — and it runs immediately: the original `scheduledAt` is
+   * deliberately not copied.
    */
   toEnqueueRequest(): EnqueueRequest {
     return {
@@ -454,6 +469,7 @@ export class DeadLetterRecord {
       jobType: this.jobType,
       payload: this.payload,
       priority: this.priority,
+      maxAttempts: this.maxAttempts,
       custom: this.custom,
       traceContext: this.traceContext,
     };

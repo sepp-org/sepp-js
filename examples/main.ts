@@ -21,42 +21,36 @@ async function main(): Promise<void> {
     jobType: JOB_TYPE,
     payload: Payload.text("hello, sepp"),
   });
-  console.log(`enqueued job ${ack.jobId} (deduplicated=${ack.deduplicated})`);
+  console.log(`enqueued job ${ack.jobId}`);
 
-  // 2. Run a worker. Its handler resolves the `done` promise so this example can
-  //    stop instead of looping forever.
-  let resolveDone: (id: string) => void;
-  const done = new Promise<string>((resolve) => {
-    resolveDone = resolve;
-  });
-
+  // 2. Run a worker. This example expects exactly one job, so the handler
+  //    triggers graceful shutdown itself; a long-running service would wire
+  //    shutdown to SIGTERM instead (see the README).
   const worker = new Worker(client, {
     queues: [QUEUE],
     leaseDuration: 30_000,
-  }).handle(JOB_TYPE, async (payload, ctx) => {
+  });
+  const handle = worker.shutdownHandle();
+
+  let processed: string | undefined;
+  worker.handle(JOB_TYPE, async (payload, ctx) => {
     const body = payload?.text() ?? "";
     console.log(`worker: processing job ${ctx.id} — payload ${JSON.stringify(body)}`);
-    resolveDone(ctx.id);
+    processed = ctx.id;
+    handle.shutdown();
   });
 
-  const handle = worker.shutdownHandle();
-  const running = worker.run();
+  // Give up if the job never arrives (e.g. another consumer grabbed it).
+  const guard = setTimeout(() => handle.shutdown(), 15_000);
 
-  // 3. Wait for the job to be processed (with a timeout), then drain & stop.
-  const id = await Promise.race([
-    done,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("timed out waiting for the job")), 15_000),
-    ),
-  ]);
-
-  // Give the worker a moment to ack before stopping, so it is not redelivered.
-  await new Promise((r) => setTimeout(r, 500));
-  handle.shutdown();
-  await running;
+  // 3. Shutdown drains in-flight jobs — including their acks — before run()
+  //    resolves, so nothing is left to be redelivered.
+  await worker.run();
+  clearTimeout(guard);
   client.close();
 
-  console.log(`roundtrip OK — job ${id} was enqueued and processed`);
+  if (!processed) throw new Error("timed out waiting for the job");
+  console.log(`roundtrip OK — job ${processed} was enqueued and processed`);
 }
 
 main().catch((err) => {

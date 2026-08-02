@@ -7,7 +7,13 @@
  * client may be shared freely across concurrent work.
  */
 
-import type { CallOptions, ChannelCredentials, ChannelOptions, ServiceError } from "@grpc/grpc-js";
+import type {
+  CallOptions,
+  ChannelCredentials,
+  ChannelOptions,
+  ClientUnaryCall,
+  ServiceError,
+} from "@grpc/grpc-js";
 import { credentials as grpcCredentials, Metadata } from "@grpc/grpc-js";
 
 import {
@@ -31,6 +37,8 @@ import {
   ConnectError,
   EmptyBatchError,
   InvalidApiKeyError,
+  isSafeTransientStatus,
+  isTransientStatus,
   JobRejectedError,
   MalformedResponseError,
 } from "./errors";
@@ -40,6 +48,7 @@ import {
   type ExtendResponse,
   type GetServerInfoResponse,
   type DeadLetterRecord as PbDeadLetterRecord,
+  type EnqueueRequest as PbEnqueueRequest,
   QueueServiceClient,
   type ReserveResponse,
 } from "./gen/sepp/v1/queue";
@@ -131,6 +140,20 @@ function isValidHeaderValue(key: string): boolean {
   return key.length > 0 && /^[\x20-\x7e]+$/.test(key);
 }
 
+/**
+ * Ambiguous-commit codes (DEADLINE_EXCEEDED, ABORTED) are only retried when
+ * every job in the request carries an idempotency key — the first attempt may
+ * have committed server-side, and a retry would duplicate keyless jobs.
+ */
+function enqueueRetryPredicate(pbJobs: PbEnqueueRequest[]): (code: number) => boolean {
+  return pbJobs.every((j) => j.idempotencyKey) ? isTransientStatus : isSafeTransientStatus;
+}
+
+/**
+ * A handle to a sepp server: connecting, enqueuing, reserving, and lease
+ * management. Build one with {@link SeppClient.connect}; every method returns a
+ * promise and the client may be shared freely across concurrent work.
+ */
 export class SeppClient {
   readonly #client: QueueServiceClient;
   readonly #bearer: string | undefined;
@@ -202,8 +225,10 @@ export class SeppClient {
     const deadline = Date.now() + (opts.connectTimeout ?? 5000);
     await new Promise<void>((resolve, reject) => {
       client.waitForReady(deadline, (err) => {
-        if (err) reject(new ConnectError(address, err.message));
-        else resolve();
+        if (err) {
+          client.close(); // don't leak the channel on the failure path
+          reject(new ConnectError(address, err.message));
+        } else resolve();
       });
     });
 
@@ -243,7 +268,8 @@ export class SeppClient {
    * Enqueues a batch of jobs on a best-effort basis. The returned array has one
    * entry per submitted job, in order, each either an {@link EnqueueAck} or a
    * {@link JobRejection} — narrow with {@link isJobRejection}. Whole-call
-   * failures throw a {@link ClientError}.
+   * failures throw a {@link ClientError}. A retried enqueue can duplicate jobs
+   * that carry no idempotency key.
    */
   async enqueueBatch(jobs: Iterable<EnqueueRequest>): Promise<Array<EnqueueAck | JobRejection>> {
     const pbJobs = Array.from(jobs, enqueueRequestToPb);
@@ -252,10 +278,13 @@ export class SeppClient {
 
     let response: EnqueueBatchResponse;
     try {
-      response = await withRetry(this.#retry, () =>
-        this.#unary<EnqueueBatchResponse>((md, opts, cb) =>
-          this.#client.enqueueBatch({ jobs: pbJobs }, md, opts, cb),
-        ),
+      response = await withRetry(
+        this.#retry,
+        () =>
+          this.#unary<EnqueueBatchResponse>((md, opts, cb) =>
+            this.#client.enqueueBatch({ jobs: pbJobs }, md, opts, cb),
+          ),
+        enqueueRetryPredicate(pbJobs),
       );
     } catch (e) {
       throw asClientError(e);
@@ -275,6 +304,7 @@ export class SeppClient {
   /**
    * Enqueues a single job. A convenience wrapper over {@link enqueueBatch} that
    * throws {@link JobRejectedError} if the server rejects this specific job.
+   * A retried enqueue can duplicate a job that carries no idempotency key.
    */
   async enqueue(job: EnqueueRequest): Promise<EnqueueAck> {
     const [result] = await this.enqueueBatch([job]);
@@ -286,7 +316,8 @@ export class SeppClient {
   /**
    * Enqueues a batch atomically: either all jobs are accepted or none are. On
    * success returns one {@link EnqueueAck} per job, in order; if any job fails
-   * validation, throws {@link BatchValidationError} with every failure.
+   * validation, throws {@link BatchValidationError} with every failure. A
+   * retried enqueue can duplicate jobs that carry no idempotency key.
    */
   async enqueueAtomic(jobs: Iterable<EnqueueRequest>): Promise<EnqueueAck[]> {
     const pbJobs = Array.from(jobs, enqueueRequestToPb);
@@ -295,10 +326,13 @@ export class SeppClient {
 
     let response: EnqueueAtomicResponse;
     try {
-      response = await withRetry(this.#retry, () =>
-        this.#unary<EnqueueAtomicResponse>((md, opts, cb) =>
-          this.#client.enqueueAtomic({ jobs: pbJobs }, md, opts, cb),
-        ),
+      response = await withRetry(
+        this.#retry,
+        () =>
+          this.#unary<EnqueueAtomicResponse>((md, opts, cb) =>
+            this.#client.enqueueAtomic({ jobs: pbJobs }, md, opts, cb),
+          ),
+        enqueueRetryPredicate(pbJobs),
       );
     } catch (e) {
       throw asClientError(e);
@@ -321,6 +355,7 @@ export class SeppClient {
    * `null` if the wait elapsed with nothing available (poll again). Each job
    * must be acked, nacked, or extended before its lease expires. Unlike the
    * other RPCs, reserve is not retried; a malformed job is logged and skipped.
+   * Pass `signal` to cancel the long-poll early (e.g. at shutdown).
    */
   async reserve(opts: ReserveOptions): Promise<Job[] | null> {
     const req = reserveOptionsToPb(opts);
@@ -331,6 +366,7 @@ export class SeppClient {
       response = await this.#unary<ReserveResponse>(
         (md, callOpts, cb) => this.#client.reserve(req, md, callOpts, cb),
         { deadline },
+        opts.signal,
       );
     } catch (e) {
       throw asReserveError(e);
@@ -361,7 +397,7 @@ export class SeppClient {
 
   /**
    * Negatively acknowledges a job. Returns true if this nack moved the job to
-   * the dead-letter queue (because `DeadLetter` was requested or `maxAttempts`
+   * the dead-letter store (because `DeadLetter` was requested or `maxAttempts`
    * was reached), false if it will be retried.
    */
   async nack(
@@ -371,7 +407,8 @@ export class SeppClient {
     const req = {
       jobId: ctx.id,
       attempt: ctx.attempt,
-      reason: opts.reason ?? "",
+      // An absent/empty reason omits the optional field on the wire.
+      reason: opts.reason || undefined,
       retry: retryDirectiveToPb(opts.retry ?? RetryDirective.default()),
       workerId: ctx.workerId,
     };
@@ -479,16 +516,32 @@ export class SeppClient {
       md: Metadata,
       opts: Partial<CallOptions>,
       cb: (e: ServiceError | null, r?: Res) => void,
-    ) => void,
+    ) => ClientUnaryCall,
     options?: Partial<CallOptions>,
+    signal?: AbortSignal,
   ): Promise<Res> {
     // Deadline is computed per attempt so each retry gets a full window.
     const callOpts = options ?? { deadline: Date.now() + this.#rpcTimeout };
     return new Promise<Res>((resolve, reject) => {
-      start(this.#buildMetadata(), callOpts, (err, res) => {
+      let call: ClientUnaryCall | undefined;
+      const onAbort = () => {
+        call?.cancel();
+        // grpc-js race: a cancel issued in the same tick the call was created
+        // rejects the caller promptly but never resets the not-yet-established
+        // HTTP/2 stream, which then lives (holding the socket, and server-side
+        // a live reserve that can swallow jobs) until the server ends it.
+        // Re-cancelling on a macrotask, once the stream exists, resets it.
+        setImmediate(() => call?.cancel());
+      };
+      call = start(this.#buildMetadata(), callOpts, (err, res) => {
+        signal?.removeEventListener("abort", onAbort);
         if (err) reject(err);
         else resolve(res as Res);
       });
+      if (signal) {
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      }
     });
   }
 }

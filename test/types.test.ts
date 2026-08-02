@@ -118,7 +118,7 @@ describe("job rejection helpers", () => {
 });
 
 describe("DeadLetterRecord", () => {
-  it("toEnqueueRequest preserves payload, priority, custom, and trace context", async () => {
+  it("toEnqueueRequest preserves payload, priority, maxAttempts, custom, and trace context", async () => {
     const { DeadLetterRecord } = await import("../src/types");
     const tc = TraceContext.create(VALID_TP);
     const rec = new DeadLetterRecord({
@@ -127,9 +127,11 @@ describe("DeadLetterRecord", () => {
       jobType: "send_email",
       payload: Payload.json({ x: 1 }),
       priority: 5,
+      maxAttempts: 3,
       custom: { k: 1 },
       traceContext: tc,
       enqueuedAt: new Date(1_700_000_000_000),
+      scheduledAt: new Date(1_700_000_010_000),
       cause: "attempts_exhausted",
       failedAt: new Date(1_700_000_100_000),
       finalAttempt: 3,
@@ -140,9 +142,12 @@ describe("DeadLetterRecord", () => {
     expect(req.queue).toBe("emails");
     expect(req.jobType).toBe("send_email");
     expect(req.priority).toBe(5);
+    expect(req.maxAttempts).toBe(3);
     expect(req.payload?.json()).toEqual({ x: 1 });
     expect(req.custom).toEqual({ k: 1 });
     expect(req.traceContext?.traceparent).toBe(VALID_TP);
+    // A replayed job runs immediately: the original schedule is not copied.
+    expect(req.scheduledAt).toBeUndefined();
   });
 });
 

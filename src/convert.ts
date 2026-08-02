@@ -129,6 +129,11 @@ function traceContextFromPb(tc: PbTraceContext | undefined): TraceContext | unde
   }
 }
 
+/** An optional proto Timestamp: a pre-epoch value is dropped (treated as unset). */
+function optionalTimestamp(date: Date | undefined): Date | undefined {
+  return date && date.getTime() >= 0 ? date : undefined;
+}
+
 /** A proto Timestamp arrives as a Date; require it to be present and representable (>= epoch). */
 function requireTimestamp(date: Date | undefined, field: string): Date {
   if (!date) {
@@ -305,6 +310,7 @@ export function jobFromPb(extend: LeaseExtendFn, j: PbJob, workerId: string | un
     attempt: j.attempt,
     maxAttempts: j.maxAttempts,
     enqueuedAt,
+    scheduledAt: optionalTimestamp(j.scheduledAt),
     custom,
     traceContext,
     leaseExpiresAt,
@@ -331,7 +337,7 @@ export function serverInfoFromPb(r: GetServerInfoResponse): ServerInfo {
     serverTime: r.serverTime,
     restrictsEncodings: r.restrictsEncodings,
     allowedEncodings: r.allowedEncodings,
-    maxPayloadSize: bigintToNumber(r.maxPayloadBytes),
+    maxPayloadBytes: bigintToNumber(r.maxPayloadBytes),
     maxCustomEntries: r.maxCustomEntries,
     maxCustomTotalBytes: bigintToNumber(r.maxCustomTotalBytes),
     maxCustomKeyBytes: r.maxCustomKeyBytes,
@@ -383,9 +389,11 @@ export function deadLetterRecordFromPb(r: PbDeadLetterRecord): DeadLetterRecord 
     jobType: j.jobType,
     payload: j.payload ? payloadFromPb(j.payload) : undefined,
     priority,
+    maxAttempts: j.maxAttempts,
     custom,
     traceContext,
     enqueuedAt,
+    scheduledAt: optionalTimestamp(j.scheduledAt),
     cause: deadLetterCauseFromPb(r.cause),
     failedAt,
     finalAttempt: r.finalAttempt,

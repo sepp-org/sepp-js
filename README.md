@@ -32,10 +32,9 @@
 
 ## Functionality
 
-- **Producers** — enqueue jobs one at a time, in best-effort batches, or atomically. Supports idempotency keys, priorities, scheduled delivery and custom metadata.
-- **Consumers** — a high-level `Worker` runs the whole reserve → process → ack loop for you with bounded concurrency, automatic lease extension and graceful shutdown, or drop down to the raw `reserve` / `ack` / `nack` / `extend` calls for full control.
-- **Observability** — if `@opentelemetry/api` is installed and a tracer provider is registered, the client propagates W3C trace context from the producer's enqueue span to the worker's process span. With nothing installed, everything is a no-op.
-- **Typed errors** — every error extends `SeppError`, and deterministic server rejections (payload too large, unknown queue, …) are separate from transient transport errors, so retry logic stays simple.
+- Enqueue jobs one at a time, in best-effort batches, or atomically, with idempotency keys, priorities, scheduled delivery and custom metadata.
+- Consume with the high-level `Worker`, which runs the whole reserve → process → ack loop with bounded concurrency, automatic lease extension and graceful shutdown — or drop down to the raw `reserve` / `ack` / `nack` / `extend` calls for full control.
+- If `@opentelemetry/api` is installed and a tracer provider is registered, the client propagates W3C trace context from the producer's enqueue span to the worker's process span. With nothing installed, everything is a no-op.
 
 The client speaks gRPC over HTTP/2 (via
 [`@grpc/grpc-js`](https://www.npmjs.com/package/@grpc/grpc-js)), so it runs in
@@ -77,15 +76,15 @@ await new Worker(client, { queues: ["emails"], leaseDuration: 30_000 })
 ```
 
 Runnable versions live in [`examples/`](examples/), including
-[`traced.ts`](examples/traced.ts) which wires up an OTLP exporter for
-end-to-end distributed tracing.
+[`traced.ts`](examples/traced.ts) which wires up a console span exporter to
+show end-to-end distributed tracing.
 
 ## Concepts
 
-- **Queues and job types.** Every job is enqueued onto a named queue and tagged with a `jobType`. Workers reserve from one or more queues and dispatch each job to the handler registered for its `jobType`.
-- **Payload.** Each job can carry an opaque `Payload` (bytes + an `encoding` hint). Use `Payload.json(value)`, `Payload.text(string)`, or `Payload.bytes(data, encoding)`. For small key/value metadata, use `custom` instead.
-- **Leases and redelivery.** A reserved job is leased for `leaseDuration` milliseconds. Ack, nack, or extend it before the lease expires, or the server redelivers it (with `attempt` incremented) until `maxAttempts` is reached and it is dead-lettered. A [`Worker`](#consuming-with-a-worker) can extend leases for you — see `autoExtend`.
-- **Durations are milliseconds; timestamps are `Date`s.** `leaseDuration`, `waitTimeout`, etc. are numbers of milliseconds; `enqueuedAt`, `leaseExpiresAt`, `scheduledAt`, and `serverTime` are `Date` objects.
+- Every job is enqueued onto a named queue and tagged with a `jobType`. Workers reserve from one or more queues and dispatch each job to the handler registered for its `jobType`.
+- Each job can carry an opaque `Payload` (bytes + an `encoding` hint). Use `Payload.json(value)`, `Payload.text(string)`, or `Payload.bytes(data, encoding)`. Payload data must be non-empty — omit the payload entirely for jobs that carry no data. For small key/value metadata, use `custom` instead.
+- A reserved job is leased for `leaseDuration` milliseconds. Ack, nack, or extend it before the lease expires, or the server redelivers it (with `attempt` incremented) until `maxAttempts` is reached and it is dead-lettered. A [`Worker`](#consuming-with-a-worker) can extend leases for you — see `autoExtend`.
+- Durations are numbers of milliseconds (`leaseDuration`, `waitTimeout`, …); timestamps are `Date` objects (`enqueuedAt`, `leaseExpiresAt`, `scheduledAt`, `serverTime`).
 
 ## Producing
 
@@ -151,7 +150,7 @@ A handler's outcome decides the job's fate:
 - returns normally → **ack**
 - throws `HandlerError.retry(reason)` → nack, retry under the queue's policy
 - throws `HandlerError.retryAfter(reason, delayMs)` → nack, retry after a delay
-- throws `HandlerError.permanent(reason)` → nack straight to the dead-letter queue
+- throws `HandlerError.permanent(reason)` → nack straight to the dead-letter store
 - throws anything else → nack for retry (and the error is logged)
 
 ### Manual reserve loop
@@ -191,7 +190,7 @@ const client = await SeppClient.connect("emails.internal:50051", {
 });
 ```
 
-The address may be `host:port`, `http://host:port` (plaintext), or `https://host:port` (implies TLS). The retry policy retries transient RPC failures on enqueue, ack, nack, extend, and getServerInfo; reserve (a long poll) and drainDeadLetters (destructive) are never retried. The default policy performs no retries.
+The address may be `host:port`, `http://host:port` (plaintext), or `https://host:port` (implies TLS). The retry policy retries transient RPC failures on enqueue, ack, nack, extend, and getServerInfo; reserve (a long poll) and drainDeadLetters (destructive) are never retried. The default policy performs no retries. A retried enqueue can duplicate jobs that carry no `idempotencyKey` (the first attempt may have committed with only its response lost), so set idempotency keys on enqueues when retries are enabled.
 
 `rpcTimeout` (default 30 s) bounds every unary call except `reserve`, which derives its deadline from its `waitTimeout`. Very large enqueue batches may need a higher value.
 
@@ -244,6 +243,8 @@ for (const record of records) {
 ```
 
 Draining **removes** the records from the server, so it is not retried — process what you get back.
+
+Dead-letter retention is off by default on the server, in which case draining always returns an empty array. Check `(await client.getServerInfo()).deadLetterRetentionEnabled` before expecting records.
 
 ## Development
 

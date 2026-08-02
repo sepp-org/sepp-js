@@ -209,6 +209,17 @@ export function isTransientStatus(code: number): boolean {
   );
 }
 
+/**
+ * Whether a gRPC status code is safe to retry even when a retry could repeat
+ * committed work. UNAVAILABLE and RESOURCE_EXHAUSTED mean the request was
+ * rejected or never ran; DEADLINE_EXCEEDED and ABORTED are ambiguous — the
+ * server may have committed with only the response lost — so they are excluded.
+ * Used to gate enqueue retries when a batch has jobs without idempotency keys.
+ */
+export function isSafeTransientStatus(code: number): boolean {
+  return code === GrpcStatus.UNAVAILABLE || code === GrpcStatus.RESOURCE_EXHAUSTED;
+}
+
 /** Normalizes any thrown value into a {@link ClientError}. */
 export function asClientError(e: unknown): ClientError {
   if (e instanceof ClientError) return e;
