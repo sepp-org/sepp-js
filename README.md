@@ -13,10 +13,9 @@
   </p>
 
   <p>
-    <a href="https://github.com/sepp-org/sepp-js/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/sepp-org/sepp-js/ci.yml?branch=main&labelColor=181512"></a>
-    <a href="https://www.npmjs.com/package/sepp-js"><img alt="npm" src="https://img.shields.io/npm/v/sepp-js?labelColor=181512"></a>
-    <a href="https://www.npmjs.com/package/sepp-js"><img alt="node versions" src="https://img.shields.io/node/v/sepp-js?labelColor=181512"></a>
-    <a href="LICENSE"><img alt="license" src="https://img.shields.io/npm/l/sepp-js?color=ec6a2e&labelColor=181512"></a>
+    <a href="https://github.com/sepp-org/sepp-js/actions"><img alt="CI" src="https://badgers.space/github/checks/sepp-org/sepp-js/main?label=CI&label_color=181512"></a>
+    <a href="https://www.npmjs.com/package/sepp-js"><img alt="npm" src="https://badgers.space/npm/version/sepp-js?label_color=181512"></a>
+    <a href="LICENSE"><img alt="license" src="https://badgers.space/github/license/sepp-org/sepp-js?label_color=181512&color=ec6a2e"></a>
   </p>
 
   <p>
