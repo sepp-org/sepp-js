@@ -1,6 +1,6 @@
 {
   "name": "sepp-js",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "JavaScript/TypeScript client for the sepp durable job queue",
   "license": "MIT",
   "author": "sepp-org",
